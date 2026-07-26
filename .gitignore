@@ -1,0 +1,27 @@
+# Local machine config
+local.properties
+gradle.properties.local
+
+# Gradle
+.gradle/
+build/
+*/build/
+
+# IDE
+*.iml
+.idea/
+!.idea/codeStyles/
+.vscode/
+
+# Signing
+*.keystore
+*.jks
+app/release/
+
+# Temp
+**/tmp/
+*.log
+
+# OS
+Thumbs.db
+.DS_Store

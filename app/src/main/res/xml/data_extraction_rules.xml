@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exclude sensitive key material (stored in noBackupFilesDir) from cloud backup & device transfer -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="no_backup" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="no_backup" path="." />
+    </device-transfer>
+</data-extraction-rules>
