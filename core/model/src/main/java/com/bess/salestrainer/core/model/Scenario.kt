@@ -118,6 +118,7 @@ data class SessionCompletion(
 )
 
 /** Local five-dimension base evaluation (TDD §9.5). UI labels it "本地基础评分". */
+@kotlinx.serialization.Serializable
 data class LocalEvaluation(
     val keywordCoverageScore: Int,
     val terminologyScore: Int,
