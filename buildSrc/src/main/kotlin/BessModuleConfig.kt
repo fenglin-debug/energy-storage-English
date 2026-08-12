@@ -13,8 +13,8 @@ object BessModuleConfig {
     const val JVM_TARGET = "17"
 
     const val APPLICATION_ID = "com.bess.salestrainer"
-    const val VERSION_CODE = 1
-    const val VERSION_NAME = "0.1.0"
+    const val VERSION_CODE = 4
+    const val VERSION_NAME = "0.3.1"
 
     const val TEST_INSTRUMENTATION_RUNNER = "androidx.test.runner.AndroidJUnitRunner"
 }

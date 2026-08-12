@@ -22,7 +22,8 @@ sealed interface ResumeTarget {
     val updatedAt: Instant
 
     data class VocabularyResume(
-        val nextWordId: String,
+        val sessionId: String,
+        val currentWordId: String,
         val remainingCount: Int,
         override val updatedAt: Instant,
     ) : ResumeTarget

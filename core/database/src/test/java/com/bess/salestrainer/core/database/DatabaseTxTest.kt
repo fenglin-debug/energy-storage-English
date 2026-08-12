@@ -3,18 +3,20 @@ package com.bess.salestrainer.core.database
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import app.cash.turbine.test
+import com.bess.salestrainer.core.database.entity.ReviewActionKeyEntity
 import com.bess.salestrainer.core.database.entity.ReviewLogEntity
 import com.bess.salestrainer.core.database.entity.ScenarioSessionEntity
-import com.bess.salestrainer.core.database.entity.StudyTaskEntity
-import com.bess.salestrainer.core.database.entity.TurnAttemptEntity
+import com.bess.salestrainer.core.database.entity.ScenarioTurnProgressEntity
 import com.bess.salestrainer.core.database.entity.VocabularyEntryEntity
+import com.bess.salestrainer.core.database.entity.VocabularySessionCheckpointEntity
 import com.bess.salestrainer.core.database.entity.WordMemoryStateEntity
 import com.bess.salestrainer.core.database.tx.ReviewTxRunner
-import com.bess.salestrainer.core.database.tx.SessionTxRunner
+import com.bess.salestrainer.core.database.tx.ScenarioTxRunner
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -25,11 +27,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * DAO and transaction-runner tests against an in-memory Room database.
+ * DAO and transaction-runner tests against an in-memory Room v2 database.
  *
- * Covers the two atomic invariants from TDD §5:
- *  - AC-02: review log + memory state + study task commit together (ReviewTxRunner)
- *  - AC-03: exactly one accepted attempt per (sessionId, turnNo) (SessionTxRunner)
+ * Covers the atomic invariants from TDD §5.3:
+ *  - review log + memory state + study task + checkpoint commit together
+ *  - (sessionId, currentIndex) idempotency key rejects double submission
+ *  - scenario rating + session advance commit together
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -59,19 +62,16 @@ class DatabaseTxTest {
         dao.upsertAll(listOf(vocab("w1", "battery"), vocab("w2", "inverter")))
         assertEquals(2, dao.activeCount())
 
-        // w1 has a memory state but is NOT yet due; w2 has no memory state.
         dao.upsertMemoryState(memoryState("w1").copy(dueAtEpochMs = 999_999L))
         assertNotNull(dao.getMemoryState("w1"))
         assertNull(dao.getMemoryState("w2"))
 
-        // Only w1 has a memory state, and it is not due yet -> due count is 0.
         dao.observeDueCount(nowEpochMs = 1000L).test {
             assertEquals(0, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
 
-        // Make w1 due -> due count becomes 1.
-        dao.upsertMemoryState(memoryState("w1").copy(dueAtEpochMs = 500L))
+        dao.upsertMemoryState(memoryState("w1", reps = 1).copy(dueAtEpochMs = 500L))
         dao.observeDueCount(nowEpochMs = 1000L).test {
             assertEquals(1, awaitItem())
             cancelAndIgnoreRemainingEvents()
@@ -88,24 +88,21 @@ class DatabaseTxTest {
     }
 
     // ---------------------------------------------------------------
-    // ReviewTxRunner: AC-02 atomicity
+    // ReviewTxRunner: atomicity + idempotency
     // ---------------------------------------------------------------
 
     @Test
-    fun recordReviewAtomicCommitsAllThreeWrites() = runTest {
+    fun recordReviewAtomicCommitsAllWrites() = runTest {
         val dao = db.vocabularyDao()
         dao.upsert(vocab("w1", "battery"))
+        dao.upsertCheckpoint(checkpoint("vs1", index = 0))
 
-        val tx = ReviewTxRunner.ReviewTx(
-            reviewLog = reviewLog("r1", "w1", 1000L),
-            memoryState = memoryState("w1", reps = 1),
-            taskDateEpochDay = 19723, // 2024-01-01
-            isNewWord = true,
-        )
-        ReviewTxRunner(db).recordReviewAtomic(tx)
+        val committed = ReviewTxRunner(db).recordReviewAtomic(reviewTx("vs1", index = 0))
+        assertTrue(committed)
 
         assertEquals(1, dao.reviewLogCountForWord("w1"))
         assertEquals(1, dao.getMemoryState("w1")!!.reps)
+        assertEquals(1, dao.getCheckpoint("vs1")!!.currentIndex)
 
         val task = db.studyTaskDao().getByDate(19723)!!
         assertEquals(1, task.newWordDone)
@@ -113,55 +110,49 @@ class DatabaseTxTest {
     }
 
     @Test
-    fun recordReviewAtomicIncrementsExistingTask() = runTest {
+    fun recordReviewAtomicRejectsDuplicateActionKey() = runTest {
         val dao = db.vocabularyDao()
         dao.upsert(vocab("w1", "battery"))
-        dao.upsert(vocab("w2", "inverter"))
+        dao.upsertCheckpoint(checkpoint("vs1", index = 0))
 
         val runner = ReviewTxRunner(db)
-        runner.recordReviewAtomic(
-            ReviewTxRunner.ReviewTx(reviewLog("r1", "w1", 1000L), memoryState("w1", 1), 19723, isNewWord = true)
-        )
-        runner.recordReviewAtomic(
-            ReviewTxRunner.ReviewTx(reviewLog("r2", "w2", 2000L), memoryState("w2", 1), 19723, isNewWord = false)
-        )
+        assertTrue(runner.recordReviewAtomic(reviewTx("vs1", index = 0)))
+        // Same (sessionId, currentIndex) submitted again (double tap).
+        assertFalse(runner.recordReviewAtomic(reviewTx("vs1", index = 0)))
 
-        val task = db.studyTaskDao().getByDate(19723)!!
-        assertEquals(1, task.newWordDone)
-        assertEquals(1, task.reviewDone)
+        assertEquals(1, dao.reviewLogCountForWord("w1"))
+        assertEquals(1, dao.getMemoryState("w1")!!.reps)
     }
 
     // ---------------------------------------------------------------
-    // SessionTxRunner: AC-03 single accepted attempt
+    // ScenarioTxRunner: rating + advance commit together
     // ---------------------------------------------------------------
 
     @Test
-    fun acceptAttemptAtomicKeepsSingleAcceptedPerTurn() = runTest {
+    fun rateAndAdvanceAtomicUpdatesProgressAndSession() = runTest {
         val scenarioDao = db.scenarioDao()
-        val session = sessionEntity("s1", turnNo = 1)
-        scenarioDao.upsertSession(session)
+        scenarioDao.upsertSession(scenarioSession("ss1", pairIndex = 0, pairCount = 2))
+        scenarioDao.upsertTurnProgress(progress("ss1", "S001_P001").copy(answerRevealed = true))
 
-        val runner = SessionTxRunner(db)
-        // First attempt accepted
-        runner.acceptAttemptAtomic(
-            SessionTxRunner.AcceptAttemptTx(
-                attempt = attempt("a1", "s1", turnNo = 1, accepted = false, createdAt = 1000L),
-                updatedSession = session.copy(currentCustomerTurnNo = 2, updatedAtEpochMs = 1000L),
-            )
-        )
-        // Second attempt for the SAME turn supersedes the first
-        runner.acceptAttemptAtomic(
-            SessionTxRunner.AcceptAttemptTx(
-                attempt = attempt("a2", "s1", turnNo = 1, accepted = false, createdAt = 2000L),
-                updatedSession = session.copy(currentCustomerTurnNo = 2, updatedAtEpochMs = 2000L),
-            )
+        ScenarioTxRunner(db).rateAndAdvanceAtomic(
+            ScenarioTxRunner.RateTx(
+                ratedProgress = progress("ss1", "S001_P001").copy(
+                    answerRevealed = true,
+                    selfRating = "BASIC",
+                    updatedAtEpochMs = 2_000L,
+                ),
+                updatedSession = scenarioSession("ss1", pairIndex = 1, pairCount = 2)
+                    .copy(currentPairId = "S001_P002", updatedAtEpochMs = 2_000L),
+                taskDateEpochDay = 19723,
+                completed = false,
+            ),
         )
 
-        val attempts = scenarioDao.getAttempts("s1")
-        assertEquals(2, attempts.size)
-        assertEquals(1, attempts.count { it.accepted })
-        assertTrue(attempts.first { it.id == "a2" }.accepted)
-        assertTrue(!attempts.first { it.id == "a1" }.accepted)
+        val p = scenarioDao.getTurnProgress("ss1", "S001_P001")!!
+        assertEquals("BASIC", p.selfRating)
+        val s = scenarioDao.getSession("ss1")!!
+        assertEquals(1, s.currentPairIndex)
+        assertEquals("S001_P002", s.currentPairId)
     }
 
     // ---------------------------------------------------------------
@@ -170,39 +161,62 @@ class DatabaseTxTest {
 
     private fun vocab(id: String, term: String) = VocabularyEntryEntity(
         id = id, term = term, normalizedTerm = term.lowercase(),
-        ipa = null, partOfSpeech = "n.", chineseGloss = "释义",
+        ipa = "/x/", partOfSpeech = "n.", chineseGloss = "释义",
         englishDefinition = null, collocationsJson = "[]",
-        exampleSentenceEn = null, exampleSentenceZh = null, commonMistakes = null,
-        topic = "general", scenarioTagsJson = "[]", cefrLevel = "B1",
-        audioRef = null, exampleAudioRef = null,
-        contentSource = "CORE", contentVersion = "1.0.0", aliasOf = null, active = true,
+        exampleSentenceEn = "Example for $term.", exampleSentenceZh = null,
+        commonMistakes = "None.", topic = "general", scenarioTagsJson = "[]",
+        cefrLevel = "B1", wordAudioAssetId = "aud_$id", exampleAudioAssetId = "aud_ex_$id",
+        contentSource = "CORE", contentHash = "hash_$id", active = true,
     )
 
     private fun memoryState(wordId: String, reps: Int = 0) = WordMemoryStateEntity(
         wordId = wordId, fsrsState = "LEARNING", difficulty = 5.0, stability = 1.0,
         dueAtEpochMs = 0L, lastReviewAtEpochMs = null, reps = reps, lapses = 0,
-        masteredUi = false, lastQuestionMode = null, isFavorite = false, updatedAtEpochMs = 0L,
+        masteredUi = false, lastQuestionMode = null, isFavorite = false,
+        learnedContentHash = null, updatedAtEpochMs = 0L,
     )
 
     private fun reviewLog(id: String, wordId: String, at: Long) = ReviewLogEntity(
         id = id, wordId = wordId, rating = "GOOD", questionMode = "EN2ZH",
-        usedHint = false, revealedAnswer = false, reviewedAtEpochMs = at,
+        usedHint = false, revealedAnswer = true, reviewedAtEpochMs = at,
         responseTimeMs = null, scheduledDays = 1, elapsedDays = 0,
         stateBefore = "LEARNING", stateAfter = "REVIEW",
     )
 
-    private fun sessionEntity(id: String, turnNo: Int) = ScenarioSessionEntity(
-        id = id, scenarioId = "sc1", mode = "PRACTICE", status = "IN_PROGRESS",
-        currentCustomerTurnNo = turnNo, localScoreJson = null,
-        aiStatus = "NOT_REQUESTED", aiEvaluationId = null,
+    private fun checkpoint(sessionId: String, index: Int) = VocabularySessionCheckpointEntity(
+        sessionId = sessionId, status = "IN_PROGRESS", corpusVersion = "test-1",
+        queueWordIdsJson = "[\"w1\"]", currentIndex = index, questionMode = "INTRODUCE",
+        answerRevealed = true, hintRevealed = false,
+        startedAtEpochMs = 0L, updatedAtEpochMs = 0L,
+    )
+
+    private fun reviewTx(sessionId: String, index: Int) = ReviewTxRunner.ReviewTx(
+        actionKey = ReviewActionKeyEntity(
+            actionKey = "$sessionId:$index",
+            sessionId = sessionId,
+            currentIndex = index,
+            createdAtEpochMs = 1_000L,
+        ),
+        reviewLog = reviewLog("r_${sessionId}_$index", "w1", 1_000L),
+        memoryState = memoryState("w1", reps = 1),
+        taskDateEpochDay = 19723, // 2024-01-01
+        isNewWord = true,
+        newWordTarget = 15,
+        reviewTarget = 0,
+        advancedCheckpoint = checkpoint(sessionId, index + 1),
+    )
+
+    private fun scenarioSession(id: String, pairIndex: Int, pairCount: Int) = ScenarioSessionEntity(
+        id = id, scenarioId = "S001", scenarioContentHash = "hash_s001",
+        status = "IN_PROGRESS", currentPairId = "S001_P001",
+        currentPairIndex = pairIndex, pairCount = pairCount,
         startedAtEpochMs = 0L, completedAtEpochMs = null, updatedAtEpochMs = 0L,
     )
 
-    private fun attempt(id: String, sessionId: String, turnNo: Int, accepted: Boolean, createdAt: Long) =
-        TurnAttemptEntity(
-            id = id, sessionId = sessionId, turnNo = turnNo, accepted = accepted,
-            rawTranscript = "hello", editedTranscript = null,
-            wpm = null, pauseRatio = null, maxPauseMs = null, fillerCount = null,
-            keywordCoverage = null, audioFileRef = null, createdAtEpochMs = createdAt,
-        )
+    private fun progress(sessionId: String, pairId: String) = ScenarioTurnProgressEntity(
+        sessionId = sessionId, pairId = pairId,
+        customerAudioCompleted = true, customerTextRevealed = false,
+        keywordsRevealed = false, answerRevealed = false,
+        selfRating = null, updatedAtEpochMs = 0L,
+    )
 }

@@ -7,16 +7,24 @@ gradle.properties.local
 build/
 */build/
 
-# IDE
+# IDE / local tools
 *.iml
 .idea/
 !.idea/codeStyles/
 .vscode/
+.workbuddy/
+.kotlin/
 
 # Signing
 *.keystore
 *.jks
 app/release/
+app/keystore/
+
+# Build artifacts
+*.apk
+*.aab
+release/
 
 # Temp
 **/tmp/

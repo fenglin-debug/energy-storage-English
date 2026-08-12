@@ -1,58 +1,101 @@
 package com.bess.salestrainer.core.model.fake
 
+import com.bess.salestrainer.core.model.CorpusCounts
+import com.bess.salestrainer.core.model.CorpusDiff
+import com.bess.salestrainer.core.model.CorpusError
+import com.bess.salestrainer.core.model.CorpusImportPreview
 import com.bess.salestrainer.core.model.CorpusImportResult
 import com.bess.salestrainer.core.model.CorpusImportState
 import com.bess.salestrainer.core.model.CorpusMetadata
-import com.bess.salestrainer.core.model.CorpusPackagePreview
+import com.bess.salestrainer.core.model.CorpusSessionImpact
+import com.bess.salestrainer.core.model.CorpusSource
 import com.bess.salestrainer.core.model.contract.CorpusRepository
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
-/** In-memory fake for corpus metadata + import state machine. */
 class FakeCorpusRepository : CorpusRepository {
-
-    private val active = MutableStateFlow(
-        CorpusMetadata(
-            packageId = "bess-corpus", contentVersion = "v1.0-fake",
-            vocabularyCount = 300, scenarioCount = 24, isBundled = true,
-        )
+    private val bundled = CorpusMetadata(
+        packageKey = "bundled-fake-1",
+        packageId = "bess-sales-english-core",
+        schemaVersion = 1,
+        contentVersion = "2026.07.26.fake",
+        vocabularyCount = 462,
+        scenarioCount = 60,
+        dialogueTurnCount = 840,
+        dialoguePairCount = 420,
+        audioAssetCount = 1_344,
+        isBundled = true,
     )
-
+    private val active = MutableStateFlow<CorpusMetadata?>(bundled)
     private val importState = MutableStateFlow<CorpusImportState>(CorpusImportState.Idle)
+    private val previews = ConcurrentHashMap<String, CorpusImportPreview>()
 
-    override fun observeActiveCorpus(): Flow<CorpusMetadata> = active
+    override fun observeActiveCorpus(): Flow<CorpusMetadata?> = active
 
     override fun observeImportState(): Flow<CorpusImportState> = importState
 
-    override suspend fun inspectPackage(uri: String): CorpusPackagePreview {
-        importState.value = CorpusImportState.Selected
-        return CorpusPackagePreview(
-            packageId = "bess-corpus", schemaVersion = 1, contentVersion = "v1.1-import",
-            vocabularyCount = 320, scenarioCount = 26, minimumAppVersionCode = 1,
-            compatible = true, incompatibleReason = null,
+    override suspend fun inspectPackage(source: CorpusSource): CorpusImportPreview {
+        require(source.documentRef.isNotBlank())
+        importState.value = CorpusImportState.Verifying
+        val preview = CorpusImportPreview(
+            previewId = UUID.randomUUID().toString(),
+            packageId = "bess-sales-english-core",
+            schemaVersion = 1,
+            contentVersion = "2026.08.01.fake",
+            minimumAppVersionCode = 1,
+            counts = CorpusCounts(470, 60, 840, 420, 1_360),
+            diff = CorpusDiff(8, 2, 0, 880),
+            sessionImpact = CorpusSessionImpact(0, 0),
+            compatible = true,
         )
+        previews[preview.previewId] = preview
+        importState.value = CorpusImportState.PreviewReady
+        return preview
     }
 
-    override suspend fun importPackage(uri: String): CorpusImportResult {
-        importState.value = CorpusImportState.Copying
-        delay(50)
-        importState.value = CorpusImportState.VerifyingChecksums
-        delay(50)
-        importState.value = CorpusImportState.Validating
-        delay(50)
+    override suspend fun activatePreview(previewId: String): CorpusImportResult {
+        val preview = previews.remove(previewId)
+            ?: return CorpusImportResult.Failure(CorpusError.PreviewExpired)
+        if (!preview.compatible || preview.errors.isNotEmpty()) {
+            return CorpusImportResult.Failure(preview.errors.firstOrNull() ?: CorpusError.PreviewExpired)
+        }
         importState.value = CorpusImportState.Committing
-        delay(50)
-        active.value = active.value.copy(contentVersion = "v1.1-import", vocabularyCount = 320, scenarioCount = 26)
-        importState.value = CorpusImportState.Idle
-        return CorpusImportResult(
-            addedCount = 20, updatedCount = 5, deactivatedCount = 2, unchangedCount = 295,
-            newContentVersion = "v1.1-import",
+        val packageKey = "${preview.packageId}-${preview.contentVersion}"
+        active.value = CorpusMetadata(
+            packageKey = packageKey,
+            packageId = preview.packageId,
+            schemaVersion = preview.schemaVersion,
+            contentVersion = preview.contentVersion,
+            vocabularyCount = preview.counts.vocabulary,
+            scenarioCount = preview.counts.scenarios,
+            dialogueTurnCount = preview.counts.dialogueTurns,
+            dialoguePairCount = preview.counts.dialoguePairs,
+            audioAssetCount = preview.counts.audioAssets,
+            isBundled = false,
         )
+        importState.value = CorpusImportState.Idle
+        return CorpusImportResult.Success(packageKey, preview.contentVersion, preview.diff)
+    }
+
+    override suspend fun discardPreview(previewId: String) {
+        previews.remove(previewId)
+        importState.value = CorpusImportState.Idle
     }
 
     override suspend fun restoreBundledCorpus(): CorpusImportResult {
-        active.value = active.value.copy(contentVersion = "v1.0-fake", isBundled = true)
-        return CorpusImportResult(0, 0, 0, 300, "v1.0-fake")
+        val alreadyActive = active.value == bundled
+        active.value = bundled
+        importState.value = CorpusImportState.Idle
+        return CorpusImportResult.Success(
+            packageKey = bundled.packageKey,
+            contentVersion = bundled.contentVersion,
+            diff = CorpusDiff(0, 0, 0, bundled.vocabularyCount + bundled.scenarioCount),
+            alreadyActive = alreadyActive,
+        )
     }
+
+    override suspend fun ensureBundledCorpusActivated(): CorpusImportResult? =
+        if (active.value == null) restoreBundledCorpus() else null
 }

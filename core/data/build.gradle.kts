@@ -1,5 +1,6 @@
 plugins {
     id("bess-android-library")
+    alias(libs.plugins.kotlin.serialization)
 }
 
 dependencies {
@@ -11,6 +12,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(project(":core:corpus"))
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

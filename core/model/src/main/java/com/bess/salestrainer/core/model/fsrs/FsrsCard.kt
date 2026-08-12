@@ -12,15 +12,19 @@ import java.time.Instant
 data class FsrsCard(
     val state: FsrsState = FsrsState.LEARNING,
     /** Learning / Relearning step index; null in Review state. */
-    val step: Int? = if (state == FsrsState.LEARNING) 0 else null,
+    val step: Int? = if (
+        state == FsrsState.LEARNING || state == FsrsState.RELEARNING
+    ) 0 else null,
     val stability: Double? = null,
     val difficulty: Double? = null,
     val due: Instant,
     val lastReview: Instant? = null,
 ) {
     init {
-        require(state != FsrsState.LEARNING || step != null) {
-            "Learning state requires a non-null step"
+        require(
+            (state != FsrsState.LEARNING && state != FsrsState.RELEARNING) || step != null,
+        ) {
+            "Learning and relearning states require a non-null step"
         }
     }
 }

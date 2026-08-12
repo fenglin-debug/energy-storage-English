@@ -1,109 +1,124 @@
 package com.bess.salestrainer.core.model.fake
 
-import app.cash.turbine.test
-import com.bess.salestrainer.core.model.QuestionMode
+import com.bess.salestrainer.core.model.AudioPlaybackState
+import com.bess.salestrainer.core.model.CorpusImportResult
+import com.bess.salestrainer.core.model.CorpusSource
+import com.bess.salestrainer.core.model.CustomerTextView
+import com.bess.salestrainer.core.model.DialogueSelfRating
+import com.bess.salestrainer.core.model.PlaybackSpeed
 import com.bess.salestrainer.core.model.Rating
 import com.bess.salestrainer.core.model.RecordWordReview
+import com.bess.salestrainer.core.model.ReferenceAnswerView
+import com.bess.salestrainer.core.model.ReviewAdvance
+import com.bess.salestrainer.core.model.ScenarioAdvance
 import com.bess.salestrainer.core.model.ScenarioFilter
-import com.bess.salestrainer.core.model.ScenarioMode
-import com.bess.salestrainer.core.model.SessionAdvance
-import com.bess.salestrainer.core.model.StartScenario
 import com.bess.salestrainer.core.model.UpdateSettings
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 
-/**
- * Wave 0 contract smoke test — verifies each Fake repository satisfies its frozen interface
- * well enough to drive the app shell end-to-end.
- */
 class FakeContractSmokeTest {
-
     @Test
-    fun `vocabulary queue emits and review removes word from queue`() = runTest {
-        val repo = FakeVocabularyRepository()
-        val initial = repo.observeTodayQueue().first()
-        assertTrue(initial.newWords.isNotEmpty())
+    fun `vocabulary session restores reveal state and rejects stale review`() = runTest {
+        val repository = FakeVocabularyRepository()
+        val sessionId = repository.startOrResumeSession()
+        assertEquals(sessionId, repository.startOrResumeSession())
 
-        val word = initial.newWords.first()
-        val result = repo.recordReview(
-            RecordWordReview(
-                wordId = word.id,
-                rating = Rating.GOOD,
-                questionMode = QuestionMode.INTRODUCE,
-                usedHint = false,
-                revealedAnswer = false,
-                reviewedAt = Instant.now(),
-            )
+        val concealed = repository.observeSession(sessionId).first()
+        assertFalse(concealed.checkpoint.answerRevealed)
+        repository.revealVocabularyAnswer(sessionId)
+        val revealed = repository.observeSession(sessionId).first()
+        assertTrue(revealed.checkpoint.answerRevealed)
+
+        val command = RecordWordReview(
+            expectedWordId = requireNotNull(revealed.currentWord).id,
+            expectedIndex = revealed.checkpoint.currentIndex,
+            rating = Rating.GOOD,
+            usedHint = false,
+            reviewedAt = Instant.now(),
         )
-        assertEquals(word.id, result.wordId)
-
-        val after = repo.observeTodayQueue().first()
-        assertFalse(after.newWords.any { it.id == word.id })
+        assertTrue(repository.recordReview(sessionId, command) is ReviewAdvance.Next)
+        val failure = runCatching { repository.recordReview(sessionId, command) }
+        assertTrue(failure.isFailure)
     }
 
     @Test
-    fun `scenario startOrResume is idempotent and acceptTurnAttempt advances`() = runTest {
-        val repo = FakeScenarioRepository()
-        val scenarios = repo.observeScenarios(ScenarioFilter()).first()
-        assertTrue(scenarios.isNotEmpty())
+    fun `scenario content is absent until each reveal command`() = runTest {
+        val repository = FakeScenarioRepository()
+        val scenarioId = repository.observeScenarios(ScenarioFilter()).first().single().id
+        val sessionId = repository.startOrResume(scenarioId)
+        assertEquals(sessionId, repository.startOrResume(scenarioId))
 
-        val s1 = repo.startOrResume(StartScenario(scenarios.first().id, ScenarioMode.SIMULATION))
-        val s2 = repo.startOrResume(StartScenario(scenarios.first().id, ScenarioMode.SIMULATION))
-        assertEquals("startOrResume must be idempotent", s1, s2)
+        val initial = repository.observeCurrentUnit(sessionId).first()
+        assertSame(CustomerTextView.Concealed, initial.unit.customerText)
+        assertSame(ReferenceAnswerView.Concealed, initial.unit.answer)
+        assertFalse(initial.progress.customerTextRevealed)
+        assertFalse(initial.progress.answerRevealed)
 
-        val detail = repo.observeSession(s1).first()
-        assertEquals(1, detail.currentCustomerTurnNo)
+        repository.revealCustomerText(sessionId, initial.unit.pairId)
+        val textRevealed = repository.observeCurrentUnit(sessionId).first()
+        assertTrue(textRevealed.unit.customerText is CustomerTextView.Revealed)
+        assertSame(ReferenceAnswerView.Concealed, textRevealed.unit.answer)
 
-        val advance = repo.acceptTurnAttempt(
-            com.bess.salestrainer.core.model.AcceptTurnAttempt(
-                sessionId = s1, turnNo = 1,
-                rawTranscript = "test", editedTranscript = null,
-                metrics = null, audioFileRef = null,
+        val earlyRating = runCatching {
+            repository.rateAndAdvance(
+                sessionId,
+                initial.unit.pairId,
+                DialogueSelfRating.BASIC,
             )
-        )
-        assertTrue(advance is SessionAdvance.NextCustomerTurn)
-    }
-
-    @Test
-    fun `study task and resume target emit`() = runTest {
-        val repo = FakeStudyTaskRepository()
-        val task = repo.observeTodayTask().first()
-        assertTrue(task.newWordTarget > 0)
-        assertNotNull(repo.observeResumeTarget().first())
-    }
-
-    @Test
-    fun `settings update applies partial fields`() = runTest {
-        val repo = FakeSettingsRepository()
-        repo.updateSettings(UpdateSettings(dailyNewWordTarget = 20, desiredRetentionPercent = 92))
-        val s = repo.observeSettings().first()
-        assertEquals(20, s.dailyNewWordTarget)
-        assertEquals(92, s.desiredRetentionPercent)
-        assertFalse(repo.hasDeepSeekKey())
-    }
-
-    @Test
-    fun `corpus, speech and ai fakes emit expected states`() = runTest {
-        val corpus = FakeCorpusRepository()
-        assertTrue(corpus.observeActiveCorpus().first().vocabularyCount > 0)
-
-        val speech = FakeSpeechRepository()
-        speech.observeAsrModelState().test {
-            assertNotNull(awaitItem())
-            cancelAndIgnoreRemainingEvents()
         }
-        val recId = speech.startRecording(com.bess.salestrainer.core.model.RecordingRequest())
-        val analysis = speech.stopAndTranscribe(recId)
-        assertTrue(analysis.transcript.isNotBlank())
+        assertTrue(earlyRating.isFailure)
 
-        val ai = FakeAiCoachRepository()
-        val result = ai.evaluateSession("sess_x")
-        assertTrue(result is com.bess.salestrainer.core.model.AiEvaluationResult.Success)
+        repository.revealReferenceAnswer(sessionId, initial.unit.pairId)
+        val advance = repository.rateAndAdvance(
+            sessionId,
+            initial.unit.pairId,
+            DialogueSelfRating.BASIC,
+        )
+        assertTrue(advance is ScenarioAdvance.NextPair)
+    }
+
+    @Test
+    fun `settings only expose offline learning preferences`() = runTest {
+        val repository = FakeSettingsRepository()
+        val before = repository.observeSettings().first()
+        repository.updateSettings(
+            UpdateSettings(
+                playbackSpeed = PlaybackSpeed.FAST,
+                dailyNewWordTarget = 20,
+                autoPlayCustomerAudio = false,
+            )
+        )
+        val after = repository.observeSettings().first()
+        assertNotEquals(before, after)
+        assertEquals(PlaybackSpeed.FAST, after.playbackSpeed)
+        assertEquals(20, after.dailyNewWordTarget)
+        assertFalse(after.autoPlayCustomerAudio)
+    }
+
+    @Test
+    fun `corpus preview token is required for activation`() = runTest {
+        val repository = FakeCorpusRepository()
+        val preview = repository.inspectPackage(CorpusSource("document:fake"))
+        val result = repository.activatePreview(preview.previewId)
+        assertTrue(result is CorpusImportResult.Success)
+        assertNotNull(repository.observeActiveCorpus().first())
+        assertTrue(repository.activatePreview(preview.previewId) is CorpusImportResult.Failure)
+    }
+
+    @Test
+    fun `audio fake exposes local playback lifecycle`() = runTest {
+        val repository = FakeAudioPlaybackRepository()
+        repository.play("audio_customer_s001_p001", PlaybackSpeed.NORMAL)
+        assertEquals(AudioPlaybackState.COMPLETED, repository.observePlayback().first().state)
+        repository.stop()
+        assertEquals(AudioPlaybackState.IDLE, repository.observePlayback().first().state)
     }
 }

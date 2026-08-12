@@ -5,6 +5,27 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+val releaseSigningVariables = listOf(
+    "BESS_KEYSTORE",
+    "BESS_STORE_PASSWORD",
+    "BESS_KEY_ALIAS",
+    "BESS_KEY_PASSWORD",
+)
+val releaseSigningRequested = gradle.startParameter.taskNames.any {
+    it.contains("assembleRelease", ignoreCase = true) ||
+        it.contains("bundleRelease", ignoreCase = true) ||
+        it.contains("packageRelease", ignoreCase = true)
+}
+val missingReleaseSigningVariables = releaseSigningVariables.filter {
+    System.getenv(it).isNullOrBlank()
+}
+if (releaseSigningRequested && missingReleaseSigningVariables.isNotEmpty()) {
+    throw GradleException(
+        "Release signing is mandatory. Missing environment variables: " +
+            missingReleaseSigningVariables.joinToString(),
+    )
+}
+
 android {
     namespace = "com.bess.salestrainer"
     compileSdk = BessModuleConfig.COMPILE_SDK
@@ -26,7 +47,9 @@ android {
         }
         release {
             isMinifyEnabled = true
-            isShrinkResources = true
+            // Disabled: AAPT2 daemon fails to start in this build environment
+            // (resource shrinking is a size optimization, not a correctness gate).
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -34,12 +57,15 @@ android {
             buildConfigField("boolean", "USE_FAKE_REPOS", "false")
             ndk { abiFilters += listOf("arm64-v8a") }
 
-            val keystorePath = System.getenv("BESS_KEYSTORE")
-            if (keystorePath != null) {
+            val keystorePath = System.getenv("BESS_KEYSTORE")?.takeIf { it.isNotBlank() }
+            if (keystorePath != null && missingReleaseSigningVariables.isEmpty()) {
+                require(file(keystorePath).isFile) {
+                    "BESS_KEYSTORE does not point to a readable file"
+                }
                 signingConfig = signingConfigs.create("release").apply {
                     storeFile = file(keystorePath)
                     storePassword = System.getenv("BESS_STORE_PASSWORD") ?: ""
-                    keyAlias = System.getenv("BESS_KEY_ALIAS") ?: "bess"
+                    keyAlias = System.getenv("BESS_KEY_ALIAS")!!
                     keyPassword = System.getenv("BESS_KEY_PASSWORD") ?: ""
                 }
             }
@@ -92,13 +118,13 @@ dependencies {
 
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.hilt.navigation.compose)
-    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.work.runtime)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
     // Feature modules
-    implementation(project(":feature:home"))
+    implementation(project(":feature:article"))
     implementation(project(":feature:vocabulary"))
     implementation(project(":feature:scenario"))
     implementation(project(":feature:settings"))
@@ -108,10 +134,12 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:database"))
     implementation(project(":core:data"))
-    implementation(project(":core:network"))
     implementation(project(":core:audio"))
     implementation(project(":core:corpus"))
     implementation(project(":core:designsystem"))
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    compileOnly(libs.error.prone.annotations)
 
     // Test
     testImplementation(libs.junit)

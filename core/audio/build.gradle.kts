@@ -9,8 +9,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.common)
-    implementation(libs.androidx.work.runtime.ktx)
-    implementation(libs.okhttp)
+    implementation(libs.androidx.media3.session)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

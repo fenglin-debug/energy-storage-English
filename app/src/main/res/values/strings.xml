@@ -2,13 +2,14 @@
 <resources>
     <string name="app_name">储能英语实战</string>
 
-    <string name="nav_home">首页</string>
     <string name="nav_vocabulary">词汇</string>
     <string name="nav_scenario">情景</string>
+    <string name="nav_article">文章</string>
     <string name="nav_settings">设置</string>
 
-    <string name="home_title">今日任务</string>
     <string name="vocabulary_title">词汇学习</string>
+    <string name="sentence_title">例句练习</string>
     <string name="scenario_title">情景模拟</string>
+    <string name="article_title">文章朗读</string>
     <string name="settings_title">设置</string>
 </resources>

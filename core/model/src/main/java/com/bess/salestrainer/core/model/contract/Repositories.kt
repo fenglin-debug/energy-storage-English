@@ -1,55 +1,82 @@
 package com.bess.salestrainer.core.model.contract
 
-import com.bess.salestrainer.core.model.AcceptTurnAttempt
-import com.bess.salestrainer.core.model.AiAdvice
-import com.bess.salestrainer.core.model.AiEvaluationResult
 import com.bess.salestrainer.core.model.AppSettings
-import com.bess.salestrainer.core.model.AsrModelState
-import com.bess.salestrainer.core.model.ConnectionTestResult
+import com.bess.salestrainer.core.model.AppSupportInfo
+import com.bess.salestrainer.core.model.Article
+import com.bess.salestrainer.core.model.ArticleDeletionResult
+import com.bess.salestrainer.core.model.ArticleImportResult
+import com.bess.salestrainer.core.model.AudioPlaybackSnapshot
+import com.bess.salestrainer.core.model.AudioQueueItem
+import com.bess.salestrainer.core.model.CorpusImportPreview
 import com.bess.salestrainer.core.model.CorpusImportResult
 import com.bess.salestrainer.core.model.CorpusImportState
 import com.bess.salestrainer.core.model.CorpusMetadata
-import com.bess.salestrainer.core.model.CorpusPackagePreview
-import com.bess.salestrainer.core.model.RecordWordReview
+import com.bess.salestrainer.core.model.CorpusSource
+import com.bess.salestrainer.core.model.LocalArticleAudioInspection
+import com.bess.salestrainer.core.model.LocalArticleImportCommand
+import com.bess.salestrainer.core.model.LocalArticleImportResult
+import com.bess.salestrainer.core.model.LocalArticleInspectionResult
+import com.bess.salestrainer.core.model.LocalArticleSubtitleInspection
+import com.bess.salestrainer.core.model.BackupDocumentRef
+import com.bess.salestrainer.core.model.LearningBackupInspection
+import com.bess.salestrainer.core.model.LearningBackupResult
+import com.bess.salestrainer.core.model.LearningBackupState
+import com.bess.salestrainer.core.model.DialogueSelfRating
+import com.bess.salestrainer.core.model.PlaybackSpeed
 import com.bess.salestrainer.core.model.ResumeTarget
-import com.bess.salestrainer.core.model.ReviewResult
+import com.bess.salestrainer.core.model.ScenarioAdvance
 import com.bess.salestrainer.core.model.ScenarioFilter
-import com.bess.salestrainer.core.model.ScenarioSessionDetail
 import com.bess.salestrainer.core.model.ScenarioSessionSummary
 import com.bess.salestrainer.core.model.ScenarioSummary
-import com.bess.salestrainer.core.model.SessionAdvance
-import com.bess.salestrainer.core.model.SessionCompletion
-import com.bess.salestrainer.core.model.SpeechAnalysis
-import com.bess.salestrainer.core.model.SpeechPlaybackRequest
-import com.bess.salestrainer.core.model.RecordingRequest
-import com.bess.salestrainer.core.model.StartScenario
+import com.bess.salestrainer.core.model.ScenarioUnitView
 import com.bess.salestrainer.core.model.TodayStudyTask
 import com.bess.salestrainer.core.model.UpdateSettings
 import com.bess.salestrainer.core.model.Vocabulary
 import com.bess.salestrainer.core.model.VocabularyFilter
 import com.bess.salestrainer.core.model.VocabularyQueue
+import com.bess.salestrainer.core.model.VocabularySessionView
+import com.bess.salestrainer.core.model.VocabularySelfAssessment
 import kotlinx.coroutines.flow.Flow
 
 /**
- * FROZEN PUBLIC CONTRACTS (per 03_Agent开发任务分解与协作规范 §4.2).
- * Owned exclusively by 主 Agent. Sub-agents may implement/consume but never modify.
- * Query = Flow, one-shot command = suspend. No Room/Retrofit/Context types leak here.
+ * Offline contract baseline v1, frozen at Gate 1.
+ *
+ * Queries expose [Flow], one-shot commands are suspending, and no Android,
+ * Room, Media3, file-system or transport type crosses this boundary.
  */
-
 interface VocabularyRepository {
     fun observeWord(wordId: String): Flow<Vocabulary>
-    fun observeTodayQueue(): Flow<VocabularyQueue>
     fun observeVocabulary(filter: VocabularyFilter): Flow<List<Vocabulary>>
-    suspend fun recordReview(command: RecordWordReview): ReviewResult
+    fun observeTodayQueue(): Flow<VocabularyQueue>
+    fun observeSession(sessionId: String): Flow<VocabularySessionView>
+    suspend fun startOrResumeSession(): String
+    suspend fun submitAssessment(
+        sessionId: String,
+        itemId: String,
+        assessment: VocabularySelfAssessment,
+    )
+    suspend fun advanceToNext(sessionId: String)
+    suspend fun setFavorite(wordId: String, favorite: Boolean)
 }
 
 interface ScenarioRepository {
     fun observeScenarios(filter: ScenarioFilter): Flow<List<ScenarioSummary>>
-    fun observeSession(sessionId: String): Flow<ScenarioSessionDetail>
+    /** Pair ids (itemType=PAIR) due for FSRS review at [nowEpochMs]. */
+    fun observeDuePairIds(nowEpochMs: Long): Flow<List<String>>
+    fun observeCurrentUnit(sessionId: String): Flow<ScenarioUnitView>
     fun observeLatestInProgress(): Flow<ScenarioSessionSummary?>
-    suspend fun startOrResume(command: StartScenario): String
-    suspend fun acceptTurnAttempt(command: AcceptTurnAttempt): SessionAdvance
-    suspend fun completeSession(sessionId: String): SessionCompletion
+    suspend fun startOrResume(scenarioId: String): String
+    suspend fun startOrResumeRandom(): String
+    suspend fun endRandomSession(sessionId: String)
+    suspend fun markCustomerAudioCompleted(sessionId: String, pairId: String)
+    suspend fun revealCustomerText(sessionId: String, pairId: String)
+    suspend fun revealKeywords(sessionId: String, pairId: String)
+    suspend fun revealReferenceAnswer(sessionId: String, pairId: String)
+    suspend fun rateAndAdvance(
+        sessionId: String,
+        pairId: String,
+        rating: DialogueSelfRating,
+    ): ScenarioAdvance
 }
 
 interface StudyTaskRepository {
@@ -59,34 +86,81 @@ interface StudyTaskRepository {
 }
 
 interface CorpusRepository {
-    fun observeActiveCorpus(): Flow<CorpusMetadata>
+    fun observeActiveCorpus(): Flow<CorpusMetadata?>
     fun observeImportState(): Flow<CorpusImportState>
-    suspend fun inspectPackage(uri: String): CorpusPackagePreview
-    suspend fun importPackage(uri: String): CorpusImportResult
+    suspend fun inspectPackage(source: CorpusSource): CorpusImportPreview
+    suspend fun activatePreview(previewId: String): CorpusImportResult
+    suspend fun discardPreview(previewId: String)
     suspend fun restoreBundledCorpus(): CorpusImportResult
+    /** Activate first launch content and upgrade an active bundled corpus; never replaces user imports. */
+    suspend fun ensureBundledCorpusActivated(): CorpusImportResult?
 }
 
-interface SpeechRepository {
-    fun observeAsrModelState(): Flow<AsrModelState>
-    suspend fun play(request: SpeechPlaybackRequest)
-    suspend fun stopPlayback()
-    suspend fun startRecording(request: RecordingRequest): String
-    suspend fun stopAndTranscribe(recordingId: String): SpeechAnalysis
-    suspend fun cancelRecording(recordingId: String)
-    suspend fun requestAsrModelDownload()
-}
-
-interface AiCoachRepository {
-    fun observeAdvice(adviceId: String): Flow<AiAdvice>
-    suspend fun evaluateSession(sessionId: String): AiEvaluationResult
-    suspend fun retryEvaluation(adviceId: String): AiEvaluationResult
+interface AudioPlaybackRepository {
+    fun observePlayback(): Flow<AudioPlaybackSnapshot>
+    suspend fun play(assetId: String, speed: PlaybackSpeed)
+    suspend fun playQueue(
+        items: List<AudioQueueItem>,
+        startIndex: Int,
+        startPositionMs: Long,
+        speed: PlaybackSpeed,
+        autoAdvance: Boolean,
+        repeatAll: Boolean,
+        reshuffleOnRepeat: Boolean = false,
+    )
+    suspend fun pause()
+    suspend fun resume()
+    suspend fun seekTo(positionMs: Long)
+    suspend fun skipToNext()
+    suspend fun skipToPrevious()
+    suspend fun stop()
 }
 
 interface SettingsRepository {
     fun observeSettings(): Flow<AppSettings>
     suspend fun updateSettings(command: UpdateSettings)
-    suspend fun saveDeepSeekKey(key: CharArray)
-    suspend fun testDeepSeekConnection(): ConnectionTestResult
-    suspend fun deleteDeepSeekKey()
-    suspend fun hasDeepSeekKey(): Boolean
+}
+
+/** Offline, user-directed export and replacement restore of learning state. */
+interface LearningBackupRepository {
+    fun observeState(): Flow<LearningBackupState>
+    suspend fun exportBackup(
+        destination: BackupDocumentRef,
+        password: String?,
+    ): LearningBackupResult
+    suspend fun inspectBackup(
+        source: BackupDocumentRef,
+        password: String?,
+    ): LearningBackupInspection
+    suspend fun restoreBackup(previewId: String): LearningBackupResult
+    suspend fun discardPreview(previewId: String)
+    suspend fun getSupportInfo(): AppSupportInfo
+    suspend fun exportDiagnostics(destination: BackupDocumentRef): LearningBackupResult
+}
+
+/** 文章朗读 (磨耳朵): bundled + imported article library. */
+interface ArticleRepository {
+    fun observeArticles(): Flow<List<Article>>
+    fun observeArticle(articleId: String): Flow<Article?>
+    suspend fun saveProgress(articleId: String, positionMs: Long, completed: Boolean)
+    /** Parse + validate a user-picked .bessarticle; returns imported count. */
+    suspend fun importArticlePack(source: CorpusSource): ArticleImportResult
+    /** Inspects an audio selection before showing the local-import confirmation form. */
+    suspend fun inspectLocalArticleAudio(
+        source: CorpusSource,
+        displayName: String,
+    ): LocalArticleInspectionResult<LocalArticleAudioInspection>
+    /** Parses and validates a selected subtitle against the inspected audio duration. */
+    suspend fun inspectLocalArticleSubtitle(
+        source: CorpusSource,
+        displayName: String,
+        audioDurationMs: Long,
+    ): LocalArticleInspectionResult<LocalArticleSubtitleInspection>
+    /** Imports audio plus optional SRT/LRC, updating an existing matching audio hash. */
+    suspend fun importLocalArticle(command: LocalArticleImportCommand): LocalArticleImportResult
+    /** Deletes a user-imported article, its progress, audio index and local audio file. */
+    suspend fun deleteImportedArticle(articleId: String): ArticleDeletionResult
+    /** First-launch bundled article activation (idempotent). */
+    suspend fun ensureBundledArticlesActivated()
+    suspend fun randomArticleIds(): List<String>
 }

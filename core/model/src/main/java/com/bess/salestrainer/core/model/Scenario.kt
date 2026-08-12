@@ -2,20 +2,21 @@ package com.bess.salestrainer.core.model
 
 import java.time.Instant
 
-/** Scenario list item (FR-DIA-001). */
 data class ScenarioSummary(
     val id: String,
     val title: String,
     val topic: String,
-    val salesStage: String?,
-    val difficulty: String?,
-    val estimatedMinutes: Int?,
-    val completed: Boolean,
-    val bestScore: Int?,
-    val lastScore: Int?,
+    val salesStage: String,
+    val customerRole: String,
+    val difficulty: String,
+    val projectType: String,
+    val estimatedMinutes: Int,
+    val status: SessionStatus?,
+    val latestRatingSummary: Map<DialogueSelfRating, Int> = emptyMap(),
+    /** Number of this scenario's dialogue pairs due for FSRS review now. */
+    val duePairCount: Int = 0,
 )
 
-/** Filter for scenario index. */
 data class ScenarioFilter(
     val topic: String? = null,
     val salesStage: String? = null,
@@ -23,108 +24,96 @@ data class ScenarioFilter(
     val onlyIncomplete: Boolean = false,
 )
 
-/** A single dialogue turn (TDD §4 DialogueTurn). */
-data class DialogueTurn(
-    val scenarioId: String,
-    val turnNo: Int,
-    val speaker: Speaker,
-    val textEn: String,
-    val textZh: String?,
-    val ttsText: String,
-    val audioRef: String?,
-    val keywords: List<String> = emptyList(),
-    val expectedPoints: List<String> = emptyList(),
-    val referenceAnswerEn: String?,
+sealed interface CustomerTextView {
+    data object Concealed : CustomerTextView
+    data class Revealed(val english: String) : CustomerTextView
+}
+
+data class Keyword(
+    val vocabularyId: String,
+    val english: String,
+    val ipa: String,
+    val chineseGloss: String,
 )
 
-/** One accepted/recorded attempt for a sales turn. */
-data class TurnAttempt(
+sealed interface KeywordsView {
+    data object Concealed : KeywordsView
+    data class Revealed(val values: List<Keyword>) : KeywordsView
+}
+
+/** A checklist item shown with the revealed reference answer (FR-SCN-06). */
+data class ScoringPoint(
     val id: String,
-    val sessionId: String,
-    val turnNo: Int,
-    val accepted: Boolean,
-    val rawTranscript: String?,
-    val editedTranscript: String?,
-    val wpm: Double?,
-    val pauseRatio: Double?,
-    val maxPauseMs: Long?,
-    val fillerCount: Int?,
-    val keywordCoverage: Double?,
-    val audioFileRef: String?,
-    val createdAt: Instant,
+    val type: String,
+    val descriptionZh: String,
+    val keywordsEn: String,
+    val required: Boolean,
+    val weight: Int,
 )
 
-/** Full session detail for the scenario screen. */
-data class ScenarioSessionDetail(
-    val sessionId: String,
+data class ReferenceAnswer(
+    val coreEnglish: String,
+    val chineseHint: String,
+    val formalAlternatives: List<String>,
+    val scoringPoints: List<ScoringPoint> = emptyList(),
+)
+
+sealed interface ReferenceAnswerView {
+    data object Concealed : ReferenceAnswerView
+    data class Revealed(val value: ReferenceAnswer) : ReferenceAnswerView
+}
+
+data class ScenarioPracticeUnit(
     val scenarioId: String,
-    val mode: ScenarioMode,
-    val status: SessionStatus,
-    val turns: List<DialogueTurn>,
-    /** The customer turn number the user must respond to (resume anchor, FR-DIA-003/AC-03). */
-    val currentCustomerTurnNo: Int,
-    val attempts: List<TurnAttempt>,
-    val localScore: LocalEvaluation?,
-    val aiStatus: AiStatus,
-    val aiAdviceId: String?,
+    val pairId: String,
+    val pairIndex: Int,
+    val pairCount: Int,
+    val customerAudioAssetId: String,
+    val customerText: CustomerTextView,
+    val keywords: KeywordsView,
+    val answer: ReferenceAnswerView,
 )
 
-/** Resumable in-progress session (FR-HOME-002). */
+data class ScenarioTurnProgress(
+    val sessionId: String,
+    val pairId: String,
+    val customerAudioCompleted: Boolean,
+    val customerTextRevealed: Boolean,
+    val keywordsRevealed: Boolean,
+    val answerRevealed: Boolean,
+    val selfRating: DialogueSelfRating?,
+    val updatedAt: Instant,
+)
+
+data class ScenarioUnitView(
+    val sessionId: String,
+    val status: SessionStatus,
+    val unit: ScenarioPracticeUnit,
+    val progress: ScenarioTurnProgress,
+)
+
 data class ScenarioSessionSummary(
     val sessionId: String,
     val scenarioId: String,
     val scenarioTitle: String,
-    val mode: ScenarioMode,
-    val currentCustomerTurnNo: Int,
-    val totalCustomerTurns: Int,
+    val status: SessionStatus,
+    val currentPairIndex: Int,
+    val pairCount: Int,
     val updatedAt: Instant,
+    val practiceMode: ScenarioPracticeMode = ScenarioPracticeMode.SCENARIO,
 )
 
-/** Command to start or resume a session (idempotent). */
-data class StartScenario(
-    val scenarioId: String,
-    val mode: ScenarioMode,
-)
+enum class ScenarioPracticeMode { SCENARIO, RANDOM }
 
-/** Command to accept a turn attempt. */
-data class AcceptTurnAttempt(
-    val sessionId: String,
-    val turnNo: Int,
-    val rawTranscript: String?,
-    val editedTranscript: String?,
-    val metrics: SpeechMetrics?,
-    val audioFileRef: String?,
-)
+sealed interface ScenarioAdvance {
+    data class NextPair(
+        val pairId: String,
+        val pairIndex: Int,
+        val pairCount: Int,
+    ) : ScenarioAdvance
 
-/** Local (offline) scoring metrics (FR-DIA-005). */
-data class SpeechMetrics(
-    val wpm: Double?,
-    val pauseRatio: Double?,
-    val maxPauseMs: Long?,
-    val fillerCount: Int?,
-    val keywordCoverage: Double?,
-)
-
-/** Result of accepting a turn — how the session advanced. */
-sealed interface SessionAdvance {
-    data class NextCustomerTurn(val turnNo: Int) : SessionAdvance
-    data class SessionCompleted(val completion: SessionCompletion) : SessionAdvance
+    data class Completed(
+        val sessionId: String,
+        val ratingDistribution: Map<DialogueSelfRating, Int>,
+    ) : ScenarioAdvance
 }
-
-/** Session completion payload. */
-data class SessionCompletion(
-    val sessionId: String,
-    val localEvaluation: LocalEvaluation,
-)
-
-/** Local five-dimension base evaluation (TDD §9.5). UI labels it "本地基础评分". */
-@kotlinx.serialization.Serializable
-data class LocalEvaluation(
-    val keywordCoverageScore: Int,
-    val terminologyScore: Int,
-    val fluencyScore: Int,
-    val conditionalScore: Int,
-    val consultativeScore: Int,
-    /** App-computed weighted total using 35/25/20/15/5 (FR-DIA-006). */
-    val weightedTotal: Int,
-)
