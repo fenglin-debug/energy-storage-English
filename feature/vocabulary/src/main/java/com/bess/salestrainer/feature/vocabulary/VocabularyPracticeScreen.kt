@@ -1,5 +1,6 @@
 package com.bess.salestrainer.feature.vocabulary
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -134,35 +135,51 @@ fun VocabularyPracticeScreen(
                             onClick = { viewModel.revealAnswer() },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                         ) { Text("显示答案") }
-                    } else if (!submitted) {
+                    } else {
+                        val prefix = if (submitted) "改成：" else ""
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            AssessmentButton("陌生", Modifier.weight(1f), state.submitting) {
+                            AssessmentButton(
+                                label = "${prefix}陌生",
+                                modifier = Modifier.weight(1f),
+                                submitting = state.submitting,
+                                selected = checkpoint.selectedAssessment ==
+                                    VocabularySelfAssessment.UNFAMILIAR,
+                            ) {
                                 viewModel.submitAssessment(VocabularySelfAssessment.UNFAMILIAR)
                             }
-                            AssessmentButton("模糊", Modifier.weight(1f), state.submitting) {
+                            AssessmentButton(
+                                label = "${prefix}模糊",
+                                modifier = Modifier.weight(1f),
+                                submitting = state.submitting,
+                                selected = checkpoint.selectedAssessment ==
+                                    VocabularySelfAssessment.FUZZY,
+                            ) {
                                 viewModel.submitAssessment(VocabularySelfAssessment.FUZZY)
                             }
-                            AssessmentButton("掌握", Modifier.weight(1f), state.submitting) {
+                            AssessmentButton(
+                                label = "${prefix}掌握",
+                                modifier = Modifier.weight(1f),
+                                submitting = state.submitting,
+                                selected = checkpoint.selectedAssessment ==
+                                    VocabularySelfAssessment.MASTERED,
+                            ) {
                                 viewModel.submitAssessment(VocabularySelfAssessment.MASTERED)
                             }
                         }
                         if (state.submitting) {
                             Text("正在保存评价…", color = MaterialTheme.colorScheme.primary)
                         }
-                    } else {
-                        Text(
-                            "已选择：${assessmentLabel(checkpoint.selectedAssessment)}",
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Button(
-                            onClick = viewModel::advanceToNext,
-                            enabled = !state.submitting,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        ) {
-                            Text(if (view.hasNext) "下一条" else "完成本次学习")
+                        if (submitted) {
+                            Button(
+                                onClick = viewModel::advanceToNext,
+                                enabled = !state.submitting,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            ) {
+                                Text(if (view.hasNext) "下一条" else "完成本次学习")
+                            }
                         }
                     }
                     OutlinedButton(
@@ -312,20 +329,22 @@ private fun AssessmentButton(
     label: String,
     modifier: Modifier,
     submitting: Boolean,
+    selected: Boolean,
     onClick: () -> Unit,
 ) {
     OutlinedButton(
         onClick = onClick,
         enabled = !submitting,
         modifier = modifier.heightIn(min = 48.dp),
+        border = BorderStroke(
+            width = if (selected) 2.dp else 1.dp,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.outline
+            },
+        ),
     ) { Text(label) }
-}
-
-private fun assessmentLabel(value: VocabularySelfAssessment?): String = when (value) {
-    VocabularySelfAssessment.UNFAMILIAR -> "陌生"
-    VocabularySelfAssessment.FUZZY -> "模糊"
-    VocabularySelfAssessment.MASTERED -> "掌握"
-    null -> ""
 }
 
 internal fun modeLabel(mode: QuestionMode): String = when (mode) {

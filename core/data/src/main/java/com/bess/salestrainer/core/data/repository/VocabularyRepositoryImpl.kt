@@ -268,112 +268,6 @@ class VocabularyRepositoryImpl(
             val queueIds = checkpoint.queueWordIdsJson.toStringList()
             val currentId = requireNotNull(queueIds.getOrNull(checkpoint.currentIndex))
             require(currentId == itemId) { "Assessment item is stale" }
-            if (checkpoint.assessmentSubmitted) {
-                require(checkpoint.selectedAssessment == assessment.name) {
-                    "A different assessment was already submitted"
-                }
-                return@withTransaction
-            }
-
-            val actionKey = "$sessionId:${checkpoint.currentIndex}"
-            if (
-                dao.insertActionKey(
-                    ReviewActionKeyEntity(
-                        actionKey = actionKey,
-                        sessionId = sessionId,
-                        currentIndex = checkpoint.currentIndex,
-                        createdAtEpochMs = now.toEpochMilli(),
-                    ),
-                ) == -1L
-            ) {
-                dao.upsertCheckpoint(
-                    checkpoint.copy(
-                        assessmentSubmitted = true,
-                        selectedAssessment = assessment.name,
-                        updatedAtEpochMs = now.toEpochMilli(),
-                    ),
-                )
-                return@withTransaction
-            }
-
-            val rating = when (assessment) {
-                VocabularySelfAssessment.UNFAMILIAR -> Rating.AGAIN
-                VocabularySelfAssessment.FUZZY -> Rating.HARD
-                VocabularySelfAssessment.MASTERED -> Rating.GOOD
-            }
-            val phrase = isPhraseId(itemId)
-            val oldPhrase = if (phrase) itemMemoryDao.get(itemId, ItemType.PHRASE.name) else null
-            val oldWord = if (phrase) null else dao.getMemoryState(itemId)
-            val isNew = oldPhrase == null && oldWord == null
-            val cardBefore = if (phrase) {
-                ItemFsrsSupport.toCard(oldPhrase, now)
-            } else if (oldWord == null) {
-                FsrsCard(due = now)
-            } else {
-                ItemFsrsSupport.fromPersisted(
-                    fsrsState = oldWord.fsrsState,
-                    stability = oldWord.stability,
-                    difficulty = oldWord.difficulty,
-                    dueAtEpochMs = oldWord.dueAtEpochMs,
-                    lastReviewAtEpochMs = oldWord.lastReviewAtEpochMs,
-                )
-            }
-            val reviewed = scheduler.reviewCard(cardBefore, rating, now).card
-            val mastered = assessment == VocabularySelfAssessment.MASTERED
-            // Always use FSRS due; masteredUi is a badge only (never Long.MAX_VALUE).
-            val dueMs = reviewed.due.toEpochMilli()
-            val reps = (oldPhrase?.reps ?: oldWord?.reps ?: 0) + 1
-            val lapses = (oldPhrase?.lapses ?: oldWord?.lapses ?: 0) +
-                if (rating == Rating.AGAIN) 1 else 0
-
-            if (phrase) {
-                itemMemoryDao.upsert(
-                    ItemFsrsSupport.toEntity(
-                        itemId = itemId,
-                        itemType = ItemType.PHRASE.name,
-                        card = reviewed,
-                        reps = reps,
-                        lapses = lapses,
-                        learnedContentHash = phraseDao.getById(itemId)?.contentHash,
-                        now = now,
-                    ).copy(masteredUi = mastered),
-                )
-            } else {
-                dao.upsertMemoryState(
-                    WordMemoryStateEntity(
-                        wordId = itemId,
-                        fsrsState = reviewed.state.name,
-                        difficulty = reviewed.difficulty ?: 0.0,
-                        stability = reviewed.stability ?: 0.0,
-                        dueAtEpochMs = dueMs,
-                        lastReviewAtEpochMs = now.toEpochMilli(),
-                        reps = reps,
-                        lapses = lapses,
-                        masteredUi = mastered,
-                        lastQuestionMode = null,
-                        isFavorite = oldWord?.isFavorite ?: false,
-                        learnedContentHash = dao.getById(itemId)?.contentHash,
-                        updatedAtEpochMs = now.toEpochMilli(),
-                    ),
-                )
-            }
-            dao.insertReviewLog(
-                ReviewLogEntity(
-                    id = UUID.randomUUID().toString(),
-                    wordId = itemId,
-                    rating = rating.name,
-                    questionMode = "SELF_ASSESSMENT",
-                    usedHint = false,
-                    revealedAnswer = true,
-                    reviewedAtEpochMs = now.toEpochMilli(),
-                    responseTimeMs = null,
-                    scheduledDays = Duration.between(now, reviewed.due)
-                        .toDays().coerceAtLeast(0),
-                    elapsedDays = 0,
-                    stateBefore = cardBefore.state.name,
-                    stateAfter = reviewed.state.name,
-                ),
-            )
             dao.upsertCheckpoint(
                 checkpoint.copy(
                     assessmentSubmitted = true,
@@ -381,21 +275,11 @@ class VocabularyRepositoryImpl(
                     updatedAtEpochMs = now.toEpochMilli(),
                 ),
             )
-            val taskDao = db.studyTaskDao()
-            val date = LocalDate.ofInstant(now, zoneId).toEpochDay()
-            taskDao.getByDate(date)?.let { task ->
-                taskDao.upsert(
-                    task.copy(
-                        newWordDone = task.newWordDone + if (isNew) 1 else 0,
-                        reviewDone = task.reviewDone + if (isNew) 0 else 1,
-                        updatedAtEpochMs = now.toEpochMilli(),
-                    ),
-                )
-            }
         }
     }
 
     override suspend fun advanceToNext(sessionId: String) {
+        val now = Instant.now()
         db.withTransaction {
             val checkpoint = requireNotNull(dao.getCheckpoint(sessionId)) {
                 "Vocabulary session $sessionId not found"
@@ -403,6 +287,21 @@ class VocabularyRepositoryImpl(
             if (checkpoint.status != VocabularySessionStatus.IN_PROGRESS.name) return@withTransaction
             if (!checkpoint.assessmentSubmitted) return@withTransaction
             val queue = checkpoint.queueWordIdsJson.toStringList()
+            val itemId = requireNotNull(queue.getOrNull(checkpoint.currentIndex))
+            val assessment = VocabularySelfAssessment.valueOf(
+                requireNotNull(checkpoint.selectedAssessment),
+            )
+            val actionInserted = dao.insertActionKey(
+                ReviewActionKeyEntity(
+                    actionKey = "$sessionId:${checkpoint.currentIndex}",
+                    sessionId = sessionId,
+                    currentIndex = checkpoint.currentIndex,
+                    createdAtEpochMs = now.toEpochMilli(),
+                ),
+            ) != -1L
+            if (actionInserted) {
+                persistAssessmentReview(itemId, assessment, now)
+            }
             val nextIndex = checkpoint.currentIndex + 1
             val completed = nextIndex >= queue.size
             val nextId = queue.getOrNull(nextIndex)
@@ -424,7 +323,7 @@ class VocabularyRepositoryImpl(
                     hintRevealed = false,
                     assessmentSubmitted = false,
                     selectedAssessment = null,
-                    updatedAtEpochMs = System.currentTimeMillis(),
+                    updatedAtEpochMs = now.toEpochMilli(),
                 ),
             )
         }
@@ -674,6 +573,102 @@ class VocabularyRepositoryImpl(
     }
 
     // ------------------------------------------------------------------
+
+    private suspend fun persistAssessmentReview(
+        itemId: String,
+        assessment: VocabularySelfAssessment,
+        now: Instant,
+    ) {
+        val rating = when (assessment) {
+            VocabularySelfAssessment.UNFAMILIAR -> Rating.AGAIN
+            VocabularySelfAssessment.FUZZY -> Rating.HARD
+            VocabularySelfAssessment.MASTERED -> Rating.GOOD
+        }
+        val phrase = isPhraseId(itemId)
+        val oldPhrase = if (phrase) itemMemoryDao.get(itemId, ItemType.PHRASE.name) else null
+        val oldWord = if (phrase) null else dao.getMemoryState(itemId)
+        val isNew = oldPhrase == null && oldWord == null
+        val cardBefore = if (phrase) {
+            ItemFsrsSupport.toCard(oldPhrase, now)
+        } else if (oldWord == null) {
+            FsrsCard(due = now)
+        } else {
+            ItemFsrsSupport.fromPersisted(
+                fsrsState = oldWord.fsrsState,
+                stability = oldWord.stability,
+                difficulty = oldWord.difficulty,
+                dueAtEpochMs = oldWord.dueAtEpochMs,
+                lastReviewAtEpochMs = oldWord.lastReviewAtEpochMs,
+            )
+        }
+        val reviewed = scheduler.reviewCard(cardBefore, rating, now).card
+        val mastered = assessment == VocabularySelfAssessment.MASTERED
+        // Always use FSRS due; masteredUi is a badge only (never Long.MAX_VALUE).
+        val dueMs = reviewed.due.toEpochMilli()
+        val reps = (oldPhrase?.reps ?: oldWord?.reps ?: 0) + 1
+        val lapses = (oldPhrase?.lapses ?: oldWord?.lapses ?: 0) +
+            if (rating == Rating.AGAIN) 1 else 0
+
+        if (phrase) {
+            itemMemoryDao.upsert(
+                ItemFsrsSupport.toEntity(
+                    itemId = itemId,
+                    itemType = ItemType.PHRASE.name,
+                    card = reviewed,
+                    reps = reps,
+                    lapses = lapses,
+                    learnedContentHash = phraseDao.getById(itemId)?.contentHash,
+                    now = now,
+                ).copy(masteredUi = mastered),
+            )
+        } else {
+            dao.upsertMemoryState(
+                WordMemoryStateEntity(
+                    wordId = itemId,
+                    fsrsState = reviewed.state.name,
+                    difficulty = reviewed.difficulty ?: 0.0,
+                    stability = reviewed.stability ?: 0.0,
+                    dueAtEpochMs = dueMs,
+                    lastReviewAtEpochMs = now.toEpochMilli(),
+                    reps = reps,
+                    lapses = lapses,
+                    masteredUi = mastered,
+                    lastQuestionMode = null,
+                    isFavorite = oldWord?.isFavorite ?: false,
+                    learnedContentHash = dao.getById(itemId)?.contentHash,
+                    updatedAtEpochMs = now.toEpochMilli(),
+                ),
+            )
+        }
+        dao.insertReviewLog(
+            ReviewLogEntity(
+                id = UUID.randomUUID().toString(),
+                wordId = itemId,
+                rating = rating.name,
+                questionMode = "SELF_ASSESSMENT",
+                usedHint = false,
+                revealedAnswer = true,
+                reviewedAtEpochMs = now.toEpochMilli(),
+                responseTimeMs = null,
+                scheduledDays = Duration.between(now, reviewed.due)
+                    .toDays().coerceAtLeast(0),
+                elapsedDays = 0,
+                stateBefore = cardBefore.state.name,
+                stateAfter = reviewed.state.name,
+            ),
+        )
+        val taskDao = db.studyTaskDao()
+        val date = LocalDate.ofInstant(now, zoneId).toEpochDay()
+        taskDao.getByDate(date)?.let { task ->
+            taskDao.upsert(
+                task.copy(
+                    newWordDone = task.newWordDone + if (isNew) 1 else 0,
+                    reviewDone = task.reviewDone + if (isNew) 0 else 1,
+                    updatedAtEpochMs = now.toEpochMilli(),
+                ),
+            )
+        }
+    }
 
     private suspend fun memoryForQuestionMode(itemId: String): WordMemoryStateEntity? {
         return if (isPhraseId(itemId)) {

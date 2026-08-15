@@ -159,7 +159,7 @@ class VocabularyViewModel @Inject constructor(
         val id = state.sessionId ?: return
         val view = state.view ?: return
         val word = view.currentWord ?: return
-        if (state.submitting || view.checkpoint.assessmentSubmitted) return
+        if (state.submitting) return
         _practiceState.value = state.copy(submitting = true)
         viewModelScope.launch {
             try {

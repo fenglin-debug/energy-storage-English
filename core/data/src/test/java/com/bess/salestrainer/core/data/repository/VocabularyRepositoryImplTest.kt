@@ -207,6 +207,8 @@ class VocabularyRepositoryImplTest {
         assertEquals(0, persisted.currentIndex)
         assertTrue(persisted.assessmentSubmitted)
         assertEquals(VocabularySelfAssessment.FUZZY.name, persisted.selectedAssessment)
+        assertEquals(0, db.vocabularyDao().getMemoryState("w1")?.reps ?: 0)
+        assertEquals(0, db.vocabularyDao().reviewLogCountForWord("w1"))
         val recreated = VocabularyRepositoryImpl(
             db = db,
             scheduler = FsrsScheduler(enableFuzzing = false),
@@ -221,6 +223,8 @@ class VocabularyRepositoryImplTest {
         assertEquals("w2", advanced.currentWord?.id)
         assertEquals(1, advanced.checkpoint.currentIndex)
         assertTrue(!advanced.checkpoint.assessmentSubmitted)
+        assertEquals(1, db.vocabularyDao().getMemoryState("w1")!!.reps)
+        assertEquals(1, db.vocabularyDao().reviewLogCountForWord("w1"))
     }
 
     @Test
@@ -230,6 +234,9 @@ class VocabularyRepositoryImplTest {
 
         repo.submitAssessment(sessionId, "w1", VocabularySelfAssessment.MASTERED)
         repo.submitAssessment(sessionId, "w1", VocabularySelfAssessment.MASTERED)
+        assertEquals(0, db.vocabularyDao().reviewLogCountForWord("w1"))
+
+        repo.advanceToNext(sessionId)
 
         assertEquals(1, db.vocabularyDao().reviewLogCountForWord("w1"))
         val mem = db.vocabularyDao().getMemoryState("w1")!!
@@ -316,8 +323,11 @@ class VocabularyRepositoryImplTest {
         repo.revealVocabularyAnswer(sessionId)
         repo.submitAssessment(sessionId, "w1", VocabularySelfAssessment.FUZZY)
 
-        assertEquals(2, db.vocabularyDao().getMemoryState("w1")!!.reps)
+        assertEquals(1, db.vocabularyDao().getMemoryState("w1")!!.reps)
         assertTrue(db.vocabularyDao().getCheckpoint(sessionId)!!.assessmentSubmitted)
+
+        repo.advanceToNext(sessionId)
+        assertEquals(2, db.vocabularyDao().getMemoryState("w1")!!.reps)
     }
 
     @Test
@@ -388,7 +398,36 @@ class VocabularyRepositoryImplTest {
         val sessionId = repo.startOrResumeSession()
         repo.submitAssessment(sessionId, "w1", VocabularySelfAssessment.UNFAMILIAR)
 
+        assertEquals(FsrsState.NEW.name, db.vocabularyDao().getMemoryState("w1")!!.fsrsState)
+
+        repo.advanceToNext(sessionId)
         assertEquals(FsrsState.LEARNING.name, db.vocabularyDao().getMemoryState("w1")!!.fsrsState)
+    }
+
+    @Test
+    fun assessmentCanBeChangedBeforeAdvance() = runTest {
+        db.vocabularyDao().upsertAll(listOf(vocab("w1", "battery"), vocab("w2", "inverter")))
+        val sessionId = repo.startOrResumeSession()
+        repo.submitAssessment(sessionId, "w1", VocabularySelfAssessment.MASTERED)
+        repo.submitAssessment(sessionId, "w1", VocabularySelfAssessment.UNFAMILIAR)
+        assertEquals(
+            VocabularySelfAssessment.UNFAMILIAR.name,
+            db.vocabularyDao().getCheckpoint(sessionId)!!.selectedAssessment,
+        )
+        assertEquals(0, db.vocabularyDao().reviewLogCountForWord("w1"))
+
+        repo.advanceToNext(sessionId)
+        assertEquals(1, db.vocabularyDao().reviewLogCountForWord("w1"))
+        val mem = db.vocabularyDao().getMemoryState("w1")!!
+        assertEquals(1, mem.lapses)
+    }
+
+    @Test
+    fun advanceWithoutAssessmentIsNoOp() = runTest {
+        db.vocabularyDao().upsert(vocab("w1", "battery"))
+        val sessionId = repo.startOrResumeSession()
+        repo.advanceToNext(sessionId)
+        assertEquals(0, db.vocabularyDao().getCheckpoint(sessionId)!!.currentIndex)
     }
 
     private fun vocab(id: String, term: String) = VocabularyEntryEntity(

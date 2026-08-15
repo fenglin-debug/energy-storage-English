@@ -104,41 +104,8 @@ class FakeVocabularyRepository : VocabularyRepository {
         if (mode != QuestionMode.INTRODUCE && !view.checkpoint.answerRevealed) {
             error("Answer must be revealed before assessment")
         }
-        if (view.checkpoint.assessmentSubmitted) return
         val now = Instant.now()
-        val rating = when (assessment) {
-            VocabularySelfAssessment.UNFAMILIAR -> Rating.AGAIN
-            VocabularySelfAssessment.FUZZY -> Rating.HARD
-            VocabularySelfAssessment.MASTERED -> Rating.GOOD
-        }
-        val days = when (rating) {
-            Rating.AGAIN -> 0L
-            Rating.HARD -> 1L
-            Rating.GOOD -> 3L
-            Rating.EASY -> 7L
-        }
-        updateMemory(
-            itemId,
-            RecordWordReview(
-                expectedWordId = itemId,
-                expectedIndex = view.checkpoint.currentIndex,
-                rating = rating,
-                usedHint = false,
-                reviewedAt = now,
-            ),
-            days,
-        )
-        if (assessment == VocabularySelfAssessment.MASTERED) {
-            words.value = words.value.map {
-                if (it.id == itemId) {
-                    it.copy(memoryState = it.memoryState?.copy(masteredUi = true))
-                } else {
-                    it
-                }
-            }
-        }
         flow.value = view.copy(
-            currentWord = words.value.first { it.id == itemId },
             checkpoint = view.checkpoint.copy(
                 assessmentSubmitted = true,
                 selectedAssessment = assessment,
@@ -151,13 +118,51 @@ class FakeVocabularyRepository : VocabularyRepository {
         val flow = sessions.getValue(sessionId)
         val view = flow.value
         if (!view.checkpoint.assessmentSubmitted) return
+        val now = Instant.now()
+        val assessment = view.checkpoint.selectedAssessment
+        val itemId = view.currentWord?.id
+        if (assessment != null && itemId != null) {
+            val rating = when (assessment) {
+                VocabularySelfAssessment.UNFAMILIAR -> Rating.AGAIN
+                VocabularySelfAssessment.FUZZY -> Rating.HARD
+                VocabularySelfAssessment.MASTERED -> Rating.GOOD
+            }
+            val days = when (rating) {
+                Rating.AGAIN -> 0L
+                Rating.HARD -> 1L
+                Rating.GOOD -> 3L
+                Rating.EASY -> 7L
+            }
+            updateMemory(
+                itemId,
+                RecordWordReview(
+                    expectedWordId = itemId,
+                    expectedIndex = view.checkpoint.currentIndex,
+                    rating = rating,
+                    usedHint = false,
+                    reviewedAt = now,
+                ),
+                days,
+            )
+            if (assessment == VocabularySelfAssessment.MASTERED) {
+                words.value = words.value.map {
+                    if (it.id == itemId) {
+                        it.copy(memoryState = it.memoryState?.copy(masteredUi = true))
+                    } else {
+                        it
+                    }
+                }
+            }
+        }
         val nextIndex = view.checkpoint.currentIndex + 1
         if (nextIndex >= view.checkpoint.queueWordIds.size) {
             flow.value = view.copy(
                 checkpoint = view.checkpoint.copy(
                     status = VocabularySessionStatus.COMPLETED,
                     currentIndex = nextIndex,
-                    updatedAt = Instant.now(),
+                    assessmentSubmitted = false,
+                    selectedAssessment = null,
+                    updatedAt = now,
                 ),
                 currentWord = null,
                 remainingCount = 0,
@@ -174,7 +179,7 @@ class FakeVocabularyRepository : VocabularyRepository {
                     hintRevealed = false,
                     assessmentSubmitted = false,
                     selectedAssessment = null,
-                    updatedAt = Instant.now(),
+                    updatedAt = now,
                 ),
                 currentWord = next,
                 remainingCount = view.checkpoint.queueWordIds.size - nextIndex,
