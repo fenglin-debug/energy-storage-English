@@ -267,10 +267,13 @@ class VocabularyRepositoryImplTest {
                 updatedAtEpochMs = now.toEpochMilli(),
             ),
         )
-        repo.startOrResumeSession()
+        // Do not start a session first: home counts come from observeTodayQueue,
+        // and the start button is disabled when new+due == 0.
         val queue = repo.observeTodayQueue().first()
         assertEquals("w1", queue.dueReviews.single().id)
-        assertTrue(db.vocabularyDao().getMemoryState("w1")!!.dueAtEpochMs < Long.MAX_VALUE)
+        val dueAt = db.vocabularyDao().getMemoryState("w1")!!.dueAtEpochMs
+        assertTrue(dueAt < Long.MAX_VALUE)
+        assertTrue(dueAt <= Instant.now().toEpochMilli())
     }
 
     @Test

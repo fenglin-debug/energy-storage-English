@@ -31,7 +31,9 @@ import com.bess.salestrainer.core.model.fsrs.FsrsScheduler
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -117,54 +119,62 @@ class VocabularyRepositoryImpl(
                 .toList()
         }
 
-    override fun observeTodayQueue(): Flow<VocabularyQueue> =
-        combine(
-            dao.observeAllActive(),
-            dao.observeAllMemoryStates(),
-            phraseDao.observeAllActive(),
-            itemMemoryDao.observeByType(ItemType.PHRASE.name),
-            settingsRepository?.observeSettings()?.map { it.dailyNewWordTarget }
-                ?: flowOf(newWordTarget),
-        ) { entries, memoryStates, phrases, phraseMemories, dailyTarget ->
-            val memById = memoryStates.associateBy { it.wordId }
-            val phraseMemById = phraseMemories.associateBy { it.itemId }
-            val examples = exampleLinks()
-            val now = System.currentTimeMillis()
-            val due = entries
-                .filter { e ->
-                    memById[e.id]?.let { it.reps > 0 && it.dueAtEpochMs <= now } == true
-                }
-                .sortedWith(compareBy({ memById[it.id]!!.dueAtEpochMs }, { it.id }))
-            val newWords = entries
-                .filter { e ->
-                    memById[e.id]?.let { it.reps == 0 && !it.masteredUi } ?: true
-                }
-                .sortedBy { it.id }
-            val duePhrases = phrases
-                .filter { p ->
-                    phraseMemById[p.id]?.let { it.dueAtEpochMs <= now } == true
-                }
-                .sortedWith(compareBy({ phraseMemById[it.id]!!.dueAtEpochMs }, { it.id }))
-            val newPhrases = phrases
-                .filter { p -> phraseMemById[p.id] == null }
-                .sortedBy { it.id }
-            val newItems = (
-                newWords.map {
-                    it.id to it.toModel(null, linkedExamples = examples[it.id].orEmpty())
-                } +
-                    newPhrases.map {
-                        it.id to it.toVocabularyModel(null, examples[it.id].orEmpty())
+    override fun observeTodayQueue(): Flow<VocabularyQueue> = flow {
+        // Home start is gated on this Flow. Repair MAX-due mastered rows first
+        // so post-upgrade users see due reviews without starting a session.
+        val now = System.currentTimeMillis()
+        dao.repairInfiniteDueReviewedWords(now)
+        itemMemoryDao.repairInfiniteDueReviewedItems(now)
+        emitAll(
+            combine(
+                dao.observeAllActive(),
+                dao.observeAllMemoryStates(),
+                phraseDao.observeAllActive(),
+                itemMemoryDao.observeByType(ItemType.PHRASE.name),
+                settingsRepository?.observeSettings()?.map { it.dailyNewWordTarget }
+                    ?: flowOf(newWordTarget),
+            ) { entries, memoryStates, phrases, phraseMemories, dailyTarget ->
+                val memById = memoryStates.associateBy { it.wordId }
+                val phraseMemById = phraseMemories.associateBy { it.itemId }
+                val examples = exampleLinks()
+                val dueNow = System.currentTimeMillis()
+                val due = entries
+                    .filter { e ->
+                        memById[e.id]?.let { it.reps > 0 && it.dueAtEpochMs <= dueNow } == true
                     }
-                ).sortedBy { it.first }.take(dailyTarget).map { it.second }
-            VocabularyQueue(
-                newWords = newItems,
-                dueReviews = due.map {
-                    it.toModel(memById[it.id], linkedExamples = examples[it.id].orEmpty())
-                } + duePhrases.map { p ->
-                    p.toVocabularyModel(phraseMemById[p.id], examples[p.id].orEmpty())
-                },
-            )
-        }
+                    .sortedWith(compareBy({ memById[it.id]!!.dueAtEpochMs }, { it.id }))
+                val newWords = entries
+                    .filter { e ->
+                        memById[e.id]?.let { it.reps == 0 && !it.masteredUi } ?: true
+                    }
+                    .sortedBy { it.id }
+                val duePhrases = phrases
+                    .filter { p ->
+                        phraseMemById[p.id]?.let { it.dueAtEpochMs <= dueNow } == true
+                    }
+                    .sortedWith(compareBy({ phraseMemById[it.id]!!.dueAtEpochMs }, { it.id }))
+                val newPhrases = phrases
+                    .filter { p -> phraseMemById[p.id] == null }
+                    .sortedBy { it.id }
+                val newItems = (
+                    newWords.map {
+                        it.id to it.toModel(null, linkedExamples = examples[it.id].orEmpty())
+                    } +
+                        newPhrases.map {
+                            it.id to it.toVocabularyModel(null, examples[it.id].orEmpty())
+                        }
+                    ).sortedBy { it.first }.take(dailyTarget).map { it.second }
+                VocabularyQueue(
+                    newWords = newItems,
+                    dueReviews = due.map {
+                        it.toModel(memById[it.id], linkedExamples = examples[it.id].orEmpty())
+                    } + duePhrases.map { p ->
+                        p.toVocabularyModel(phraseMemById[p.id], examples[p.id].orEmpty())
+                    },
+                )
+            },
+        )
+    }
 
     override fun observeSession(sessionId: String): Flow<VocabularySessionView> =
         dao.observeCheckpoint(sessionId).flatMapLatest { checkpoint ->
