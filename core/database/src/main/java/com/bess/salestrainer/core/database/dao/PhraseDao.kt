@@ -34,7 +34,7 @@ interface PhraseDao {
         """
         SELECT p.* FROM phrases p
         INNER JOIN item_memory_states m ON m.itemId = p.id AND m.itemType = 'PHRASE'
-        WHERE p.active = 1 AND m.masteredUi = 0 AND m.dueAtEpochMs <= :nowEpochMs
+        WHERE p.active = 1 AND m.dueAtEpochMs <= :nowEpochMs
         ORDER BY m.dueAtEpochMs ASC, p.id ASC
         """,
     )

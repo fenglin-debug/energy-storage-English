@@ -37,8 +37,21 @@ interface ItemMemoryDao {
     @Query(
         """
         SELECT COUNT(*) FROM item_memory_states
-        WHERE itemType = :itemType AND masteredUi = 0 AND dueAtEpochMs <= :nowEpochMs
+        WHERE itemType = :itemType AND dueAtEpochMs <= :nowEpochMs
         """,
     )
     fun observeDueCount(itemType: String, nowEpochMs: Long): Flow<Int>
+
+    /** Repair legacy infinite-due item rows so reviewed items re-enter the queue. */
+    @Query(
+        """
+        UPDATE item_memory_states
+        SET dueAtEpochMs = CASE
+            WHEN lastReviewAtEpochMs IS NULL THEN :nowEpochMs
+            ELSE lastReviewAtEpochMs + 86400000
+        END
+        WHERE fsrsState != 'NEW' AND dueAtEpochMs >= 9223372036854775807
+        """,
+    )
+    suspend fun repairInfiniteDueReviewedItems(nowEpochMs: Long)
 }

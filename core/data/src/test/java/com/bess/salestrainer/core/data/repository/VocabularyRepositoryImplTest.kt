@@ -206,7 +206,7 @@ class VocabularyRepositoryImplTest {
     }
 
     @Test
-    fun duplicateAssessmentIsIdempotentAndMasteredNeverReturnsToQueue() = runTest {
+    fun duplicateAssessmentIsIdempotentAndMasteredRemainsSchedulable() = runTest {
         db.vocabularyDao().upsert(vocab("w1", "battery"))
         val sessionId = repo.startOrResumeSession()
 
@@ -214,14 +214,63 @@ class VocabularyRepositoryImplTest {
         repo.submitAssessment(sessionId, "w1", VocabularySelfAssessment.MASTERED)
 
         assertEquals(1, db.vocabularyDao().reviewLogCountForWord("w1"))
-        assertEquals(1, db.vocabularyDao().getMemoryState("w1")!!.reps)
-        assertTrue(db.vocabularyDao().getMemoryState("w1")!!.masteredUi)
-        repo.observeTodayQueue().test {
-            val queue = awaitItem()
-            assertTrue(queue.newWords.isEmpty())
-            assertTrue(queue.dueReviews.isEmpty())
-            cancelAndIgnoreRemainingEvents()
-        }
+        val mem = db.vocabularyDao().getMemoryState("w1")!!
+        assertEquals(1, mem.reps)
+        assertTrue(mem.masteredUi)
+        assertTrue(mem.dueAtEpochMs < Long.MAX_VALUE)
+        val logs = db.vocabularyDao().observeReviewLogsSince(0L).first()
+        assertEquals(Rating.GOOD.name, logs.single().rating)
+    }
+
+    @Test
+    fun infiniteDueReviewedWordIsRepairedIntoTodayQueue() = runTest {
+        val now = Instant.now()
+        db.vocabularyDao().upsert(vocab("w1", "battery"))
+        db.vocabularyDao().upsertMemoryState(
+            WordMemoryStateEntity(
+                wordId = "w1",
+                fsrsState = FsrsState.REVIEW.name,
+                difficulty = 5.0,
+                stability = 10.0,
+                dueAtEpochMs = Long.MAX_VALUE,
+                lastReviewAtEpochMs = now.minusSeconds(86_400 * 40).toEpochMilli(),
+                reps = 3,
+                lapses = 0,
+                masteredUi = true,
+                lastQuestionMode = null,
+                learnedContentHash = "hash_w1",
+                updatedAtEpochMs = now.toEpochMilli(),
+            ),
+        )
+        repo.startOrResumeSession()
+        val queue = repo.observeTodayQueue().first()
+        assertEquals("w1", queue.dueReviews.single().id)
+        assertTrue(db.vocabularyDao().getMemoryState("w1")!!.dueAtEpochMs < Long.MAX_VALUE)
+    }
+
+    @Test
+    fun favoritePlaceholderIsNotTreatedAsDue() = runTest {
+        val now = Instant.now()
+        db.vocabularyDao().upsert(vocab("w1", "battery"))
+        db.vocabularyDao().upsertMemoryState(
+            WordMemoryStateEntity(
+                wordId = "w1",
+                fsrsState = FsrsState.NEW.name,
+                difficulty = 0.0,
+                stability = 0.0,
+                dueAtEpochMs = Long.MAX_VALUE,
+                lastReviewAtEpochMs = null,
+                reps = 0,
+                lapses = 0,
+                masteredUi = false,
+                lastQuestionMode = null,
+                isFavorite = true,
+                learnedContentHash = "hash_w1",
+                updatedAtEpochMs = now.toEpochMilli(),
+            ),
+        )
+        val queue = repo.observeTodayQueue().first()
+        assertTrue(queue.dueReviews.none { it.id == "w1" })
     }
 
     @Test

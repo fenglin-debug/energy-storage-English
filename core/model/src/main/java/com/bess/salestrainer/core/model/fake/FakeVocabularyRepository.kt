@@ -103,7 +103,13 @@ class FakeVocabularyRepository : VocabularyRepository {
         val rating = when (assessment) {
             VocabularySelfAssessment.UNFAMILIAR -> Rating.AGAIN
             VocabularySelfAssessment.FUZZY -> Rating.HARD
-            VocabularySelfAssessment.MASTERED -> Rating.EASY
+            VocabularySelfAssessment.MASTERED -> Rating.GOOD
+        }
+        val days = when (rating) {
+            Rating.AGAIN -> 0L
+            Rating.HARD -> 1L
+            Rating.GOOD -> 3L
+            Rating.EASY -> 7L
         }
         updateMemory(
             itemId,
@@ -114,12 +120,12 @@ class FakeVocabularyRepository : VocabularyRepository {
                 usedHint = false,
                 reviewedAt = now,
             ),
-            if (assessment == VocabularySelfAssessment.UNFAMILIAR) 0 else 1,
+            days,
         )
         if (assessment == VocabularySelfAssessment.MASTERED) {
             words.value = words.value.map {
                 if (it.id == itemId) {
-                    it.copy(memoryState = it.memoryState?.copy(masteredUi = true, dueAt = Instant.MAX))
+                    it.copy(memoryState = it.memoryState?.copy(masteredUi = true))
                 } else {
                     it
                 }

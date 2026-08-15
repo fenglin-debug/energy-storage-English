@@ -132,9 +132,7 @@ class VocabularyRepositoryImpl(
             val now = System.currentTimeMillis()
             val due = entries
                 .filter { e ->
-                    memById[e.id]?.let {
-                        !it.masteredUi && it.reps > 0 && it.dueAtEpochMs <= now
-                    } == true
+                    memById[e.id]?.let { it.reps > 0 && it.dueAtEpochMs <= now } == true
                 }
                 .sortedWith(compareBy({ memById[it.id]!!.dueAtEpochMs }, { it.id }))
             val newWords = entries
@@ -144,7 +142,7 @@ class VocabularyRepositoryImpl(
                 .sortedBy { it.id }
             val duePhrases = phrases
                 .filter { p ->
-                    phraseMemById[p.id]?.let { !it.masteredUi && it.dueAtEpochMs <= now } == true
+                    phraseMemById[p.id]?.let { it.dueAtEpochMs <= now } == true
                 }
                 .sortedWith(compareBy({ phraseMemById[it.id]!!.dueAtEpochMs }, { it.id }))
             val newPhrases = phrases
@@ -211,6 +209,9 @@ class VocabularyRepositoryImpl(
         dao.getLatestInProgressCheckpoint()?.let { return it.sessionId }
 
         val now = System.currentTimeMillis()
+        // Legacy mastered rows used Long.MAX_VALUE due; repair before queue build.
+        dao.repairInfiniteDueReviewedWords(now)
+        itemMemoryDao.repairInfiniteDueReviewedItems(now)
         val dailyTarget = settingsRepository?.observeSettings()?.first()?.dailyNewWordTarget
             ?: newWordTarget
         // Build the frozen queue: all due reviews (by due time) then today's new
@@ -309,7 +310,7 @@ class VocabularyRepositoryImpl(
             val rating = when (assessment) {
                 VocabularySelfAssessment.UNFAMILIAR -> Rating.AGAIN
                 VocabularySelfAssessment.FUZZY -> Rating.HARD
-                VocabularySelfAssessment.MASTERED -> Rating.EASY
+                VocabularySelfAssessment.MASTERED -> Rating.GOOD
             }
             val phrase = isPhraseId(itemId)
             val oldPhrase = if (phrase) itemMemoryDao.get(itemId, ItemType.PHRASE.name) else null
@@ -330,7 +331,8 @@ class VocabularyRepositoryImpl(
             }
             val reviewed = scheduler.reviewCard(cardBefore, rating, now).card
             val mastered = assessment == VocabularySelfAssessment.MASTERED
-            val dueMs = if (mastered) Long.MAX_VALUE else reviewed.due.toEpochMilli()
+            // Always use FSRS due; masteredUi is a badge only (never Long.MAX_VALUE).
+            val dueMs = reviewed.due.toEpochMilli()
             val reps = (oldPhrase?.reps ?: oldWord?.reps ?: 0) + 1
             val lapses = (oldPhrase?.lapses ?: oldWord?.lapses ?: 0) +
                 if (rating == Rating.AGAIN) 1 else 0
@@ -340,7 +342,7 @@ class VocabularyRepositoryImpl(
                     ItemFsrsSupport.toEntity(
                         itemId = itemId,
                         itemType = ItemType.PHRASE.name,
-                        card = reviewed.copy(due = Instant.ofEpochMilli(dueMs)),
+                        card = reviewed,
                         reps = reps,
                         lapses = lapses,
                         learnedContentHash = phraseDao.getById(itemId)?.contentHash,
@@ -376,7 +378,7 @@ class VocabularyRepositoryImpl(
                     revealedAnswer = true,
                     reviewedAtEpochMs = now.toEpochMilli(),
                     responseTimeMs = null,
-                    scheduledDays = Duration.between(now, Instant.ofEpochMilli(dueMs))
+                    scheduledDays = Duration.between(now, reviewed.due)
                         .toDays().coerceAtLeast(0),
                     elapsedDays = 0,
                     stateBefore = cardBefore.state.name,

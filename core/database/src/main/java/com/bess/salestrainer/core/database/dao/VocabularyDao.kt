@@ -40,12 +40,12 @@ interface VocabularyDao {
     )
     suspend fun getNewWords(limit: Int): List<VocabularyEntryEntity>
 
-    /** All due reviews, ordered by due time; no truncation cap. */
+    /** All due reviews, ordered by due time; no truncation cap. Mastered is a badge only. */
     @Query(
         """
         SELECT v.* FROM vocabulary_entries v
         INNER JOIN word_memory_states m ON m.wordId = v.id
-        WHERE v.active = 1 AND m.masteredUi = 0 AND m.reps > 0
+        WHERE v.active = 1 AND m.reps > 0
             AND m.dueAtEpochMs <= :nowEpochMs
         ORDER BY m.dueAtEpochMs ASC, v.id ASC
         """
@@ -56,11 +56,24 @@ interface VocabularyDao {
         """
         SELECT COUNT(*) FROM vocabulary_entries v
         INNER JOIN word_memory_states m ON m.wordId = v.id
-        WHERE v.active = 1 AND m.masteredUi = 0 AND m.reps > 0
+        WHERE v.active = 1 AND m.reps > 0
             AND m.dueAtEpochMs <= :nowEpochMs
         """
     )
     fun observeDueCount(nowEpochMs: Long): Flow<Int>
+
+    /** Repair legacy mastered rows that used Long.MAX_VALUE as due (never reappear). */
+    @Query(
+        """
+        UPDATE word_memory_states
+        SET dueAtEpochMs = CASE
+            WHEN lastReviewAtEpochMs IS NULL THEN :nowEpochMs
+            ELSE lastReviewAtEpochMs + 86400000
+        END
+        WHERE reps > 0 AND dueAtEpochMs >= 9223372036854775807
+        """,
+    )
+    suspend fun repairInfiniteDueReviewedWords(nowEpochMs: Long)
 
     @Query("SELECT * FROM vocabulary_entries WHERE active = 1 ORDER BY term")
     fun observeAllActive(): Flow<List<VocabularyEntryEntity>>
