@@ -24,7 +24,7 @@ app/keystore/
 # Build artifacts
 *.apk
 *.aab
-release/
+/release/
 
 # Temp
 **/tmp/
