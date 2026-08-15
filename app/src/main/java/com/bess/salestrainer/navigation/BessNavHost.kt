@@ -12,14 +12,17 @@ import com.bess.salestrainer.feature.article.ArticlePlayerScreen
 import com.bess.salestrainer.feature.scenario.ScenarioPracticeScreen
 import com.bess.salestrainer.feature.scenario.ScenarioScreen
 import com.bess.salestrainer.feature.settings.SettingsScreen
+import com.bess.salestrainer.feature.vocabulary.VocabularyDetailScreen
 import com.bess.salestrainer.feature.vocabulary.VocabularyPracticeScreen
 import com.bess.salestrainer.feature.vocabulary.VocabularyScreen
 
 object Routes {
     const val VOCAB_PRACTICE = "vocabulary/practice"
+    const val VOCAB_DETAIL = "vocabulary/detail/{wordId}"
     const val SCENARIO_PRACTICE = "scenario/practice/{scenarioId}"
     const val ARTICLE_PLAYER = "article/player/{articleId}"
     const val SETTINGS = "settings"
+    fun vocabDetail(wordId: String) = "vocabulary/detail/$wordId"
     fun scenarioPractice(scenarioId: String) = "scenario/practice/$scenarioId"
     fun articlePlayer(articleId: String) = "article/player/$articleId"
 }
@@ -37,11 +40,21 @@ fun BessNavHost(
         composable(TopLevelDestination.VOCABULARY.route) {
             VocabularyScreen(
                 onStartPractice = { navController.navigate(Routes.VOCAB_PRACTICE) },
+                onOpenWord = { id -> navController.navigate(Routes.vocabDetail(id)) },
             )
         }
         composable(Routes.VOCAB_PRACTICE) {
             VocabularyPracticeScreen(
                 onFinished = { navController.popBackStack() },
+            )
+        }
+        composable(
+            route = Routes.VOCAB_DETAIL,
+            arguments = listOf(navArgument("wordId") { type = NavType.StringType }),
+        ) { entry ->
+            VocabularyDetailScreen(
+                wordId = entry.arguments?.getString("wordId").orEmpty(),
+                onBack = { navController.popBackStack() },
             )
         }
         composable(TopLevelDestination.SCENARIO.route) {

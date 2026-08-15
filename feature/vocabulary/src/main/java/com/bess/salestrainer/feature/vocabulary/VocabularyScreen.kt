@@ -1,22 +1,28 @@
 package com.bess.salestrainer.feature.vocabulary
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,22 +37,23 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bess.salestrainer.core.model.MasteryFilter
 import com.bess.salestrainer.core.model.Vocabulary
+import com.bess.salestrainer.core.model.VocabularyFilter
 
 /** B-02: vocabulary browser + favorites. */
 @Composable
 fun VocabularyScreen(
     onStartPractice: () -> Unit = {},
+    onOpenWord: (String) -> Unit = {},
     viewModel: VocabularyViewModel = hiltViewModel(),
 ) {
     val homeState by viewModel.homeState.collectAsStateWithLifecycle()
-    VocabularyHomeContent(homeState, onStartPractice)
-    return
-
-    @Suppress("UNREACHABLE_CODE")
     val state by viewModel.listState.collectAsStateWithLifecycle()
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("词汇库", style = MaterialTheme.typography.headlineSmall)
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        TodaySummary(homeState, onStartPractice)
 
         OutlinedTextField(
             value = state.filter.query.orEmpty(),
@@ -56,96 +63,66 @@ fun VocabularyScreen(
             singleLine = true,
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = state.filter.mastery == MasteryFilter.NOT_STARTED,
-                onClick = {
-                    viewModel.updateFilter(
-                        state.filter.copy(
-                            mastery = if (state.filter.mastery == MasteryFilter.NOT_STARTED) {
-                                MasteryFilter.ALL
-                            } else {
-                                MasteryFilter.NOT_STARTED
+        FilterChipRow(
+            filter = state.filter,
+            onFilterChange = viewModel::updateFilter,
+        )
+
+        when {
+            state.loading -> {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) { CircularProgressIndicator() }
+            }
+            state.words.isEmpty() && state.filter.hasActiveConstraints() -> {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        "没有符合条件的词",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(
+                        onClick = viewModel::clearFilter,
+                        modifier = Modifier.padding(top = 16.dp).heightIn(min = 48.dp),
+                    ) { Text("清除筛选") }
+                }
+            }
+            state.words.isEmpty() -> {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        "正在准备离线学习内容，请稍候",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            else -> {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(state.words, key = { it.id }) { word ->
+                        VocabularyRow(
+                            word = word,
+                            onOpenWord = onOpenWord,
+                            onToggleFavorite = {
+                                viewModel.toggleFavorite(
+                                    word.id,
+                                    !(word.memoryState?.isFavorite ?: false),
+                                )
                             },
-                        ),
-                    )
-                },
-                label = { Text("未学") },
-            )
-            FilterChip(
-                selected = state.filter.dueOnly,
-                onClick = { viewModel.updateFilter(state.filter.copy(dueOnly = !state.filter.dueOnly)) },
-                label = { Text("到期") },
-            )
-            FilterChip(
-                selected = state.filter.favoritesOnly,
-                onClick = {
-                    viewModel.updateFilter(state.filter.copy(favoritesOnly = !state.filter.favoritesOnly))
-                },
-                label = { Text("收藏") },
-            )
-        }
-
-        androidx.compose.material3.Button(
-            onClick = onStartPractice,
-            enabled = !state.loading && state.words.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("开始学习 / 复习") }
-
-        if (state.loading) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) { CircularProgressIndicator() }
-        } else if (state.words.isEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    "正在准备离线学习内容，请稍候",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else if (state.words.isEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    "正在准备离线学习内容，请稍候",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else if (state.words.isEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    "正在准备离线学习内容，请稍候",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(state.words, key = { it.id }) { word ->
-                    VocabularyRow(
-                        word = word,
-                        onToggleFavorite = {
-                            viewModel.toggleFavorite(
-                                word.id,
-                                !(word.memoryState?.isFavorite ?: false),
-                            )
-                        },
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -153,26 +130,21 @@ fun VocabularyScreen(
 }
 
 @Composable
-private fun VocabularyHomeContent(
+private fun TodaySummary(
     state: VocabularyHomeUiState,
     onStartPractice: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("今日词汇", style = MaterialTheme.typography.headlineMedium)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("今日词汇", style = MaterialTheme.typography.titleLarge)
         Text(
-            "新内容 ${state.newCount} 条 · 到期 ${state.dueCount} 条",
-            modifier = Modifier.padding(top = 12.dp, bottom = 28.dp),
+            "新内容 ${state.newCount} · 到期 ${state.dueCount}",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        androidx.compose.material3.Button(
+        Button(
             onClick = onStartPractice,
             enabled = !state.loading && state.newCount + state.dueCount > 0,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             if (state.loading) {
                 CircularProgressIndicator(
@@ -187,7 +159,6 @@ private fun VocabularyHomeContent(
         if (!state.loading && state.newCount + state.dueCount == 0) {
             Text(
                 "今天的自动学习任务已完成",
-                modifier = Modifier.padding(top = 16.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -195,9 +166,60 @@ private fun VocabularyHomeContent(
 }
 
 @Composable
-private fun VocabularyRow(word: Vocabulary, onToggleFavorite: () -> Unit) {
+private fun FilterChipRow(
+    filter: VocabularyFilter,
+    onFilterChange: (VocabularyFilter) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = filter.mastery == MasteryFilter.NOT_STARTED,
+            onClick = {
+                onFilterChange(filter.copy(mastery = nextMasteryFilter(filter.mastery, MasteryFilter.NOT_STARTED)))
+            },
+            label = { Text("未学") },
+        )
+        FilterChip(
+            selected = filter.mastery == MasteryFilter.LEARNING,
+            onClick = {
+                onFilterChange(filter.copy(mastery = nextMasteryFilter(filter.mastery, MasteryFilter.LEARNING)))
+            },
+            label = { Text("学习中") },
+        )
+        FilterChip(
+            selected = filter.mastery == MasteryFilter.MASTERED,
+            onClick = {
+                onFilterChange(filter.copy(mastery = nextMasteryFilter(filter.mastery, MasteryFilter.MASTERED)))
+            },
+            label = { Text("已掌握") },
+        )
+        FilterChip(
+            selected = filter.dueOnly,
+            onClick = { onFilterChange(filter.copy(dueOnly = !filter.dueOnly)) },
+            label = { Text("到期") },
+        )
+        FilterChip(
+            selected = filter.favoritesOnly,
+            onClick = { onFilterChange(filter.copy(favoritesOnly = !filter.favoritesOnly)) },
+            label = { Text("收藏") },
+        )
+    }
+}
+
+@Composable
+private fun VocabularyRow(
+    word: Vocabulary,
+    onOpenWord: (String) -> Unit,
+    onToggleFavorite: () -> Unit,
+) {
     val favorite = word.memoryState?.isFavorite ?: false
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpenWord(word.id) },
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -235,6 +257,17 @@ private fun VocabularyRow(word: Vocabulary, onToggleFavorite: () -> Unit) {
         }
     }
 }
+
+internal fun nextMasteryFilter(current: MasteryFilter, tapped: MasteryFilter): MasteryFilter =
+    if (current == tapped) MasteryFilter.ALL else tapped
+
+internal fun VocabularyFilter.hasActiveConstraints(): Boolean =
+    !query.isNullOrBlank() ||
+        mastery != MasteryFilter.ALL ||
+        dueOnly ||
+        favoritesOnly ||
+        !topic.isNullOrBlank() ||
+        !cefrLevel.isNullOrBlank()
 
 /** Clears semantics for concealed content (a11y gate: hidden text must not leak). */
 fun Modifier.concealedSemantics(): Modifier = clearAndSetSemantics { }

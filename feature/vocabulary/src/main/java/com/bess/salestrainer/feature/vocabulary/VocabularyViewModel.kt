@@ -91,6 +91,10 @@ class VocabularyViewModel @Inject constructor(
         _filter.value = filter
     }
 
+    fun clearFilter() {
+        _filter.value = VocabularyFilter()
+    }
+
     fun toggleFavorite(wordId: String, favorite: Boolean) {
         viewModelScope.launch { vocabularyRepository.setFavorite(wordId, favorite) }
     }
