@@ -13,6 +13,7 @@ import com.bess.salestrainer.core.model.ReviewAdvance
 import com.bess.salestrainer.core.model.ScenarioAdvance
 import com.bess.salestrainer.core.model.ScenarioFilter
 import com.bess.salestrainer.core.model.UpdateSettings
+import com.bess.salestrainer.core.model.contract.VocabularyRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -33,7 +34,8 @@ class FakeContractSmokeTest {
 
         val concealed = repository.observeSession(sessionId).first()
         assertFalse(concealed.checkpoint.answerRevealed)
-        repository.revealVocabularyAnswer(sessionId)
+        val contract: VocabularyRepository = repository
+        contract.revealVocabularyAnswer(sessionId)
         val revealed = repository.observeSession(sessionId).first()
         assertTrue(revealed.checkpoint.answerRevealed)
 

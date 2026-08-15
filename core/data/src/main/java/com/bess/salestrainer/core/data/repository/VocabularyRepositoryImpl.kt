@@ -227,25 +227,10 @@ class VocabularyRepositoryImpl(
         require(queue.isNotEmpty()) { "No vocabulary available for study" }
 
         val firstWordId = queue.first()
-        val firstMemory = if (isPhraseId(firstWordId)) {
-            itemMemoryDao.get(firstWordId, ItemType.PHRASE.name)?.let {
-                // Reuse the word-mode decision path: state + reps matter only.
-                WordMemoryStateEntity(
-                    wordId = it.itemId, fsrsState = it.fsrsState,
-                    difficulty = it.difficulty, stability = it.stability,
-                    dueAtEpochMs = it.dueAtEpochMs,
-                    lastReviewAtEpochMs = it.lastReviewAtEpochMs,
-                    reps = it.reps, lapses = it.lapses,
-                    masteredUi = false, lastQuestionMode = null,
-                    isFavorite = false, learnedContentHash = it.learnedContentHash,
-                    updatedAtEpochMs = it.updatedAtEpochMs,
-                )
-            }
-        } else {
-            dao.getMemoryState(firstWordId)
-        }
+        val firstMemory = memoryForQuestionMode(firstWordId)
         val sessionId = "vocab_${UUID.randomUUID()}"
         val corpusVersion = db.corpusDao().getActive()?.contentVersion ?: "none"
+        val mode = questionModeFor(firstMemory)
         dao.upsertCheckpoint(
             VocabularySessionCheckpointEntity(
                 sessionId = sessionId,
@@ -253,8 +238,8 @@ class VocabularyRepositoryImpl(
                 corpusVersion = corpusVersion,
                 queueWordIdsJson = queue.toJsonString(),
                 currentIndex = 0,
-                questionMode = questionModeFor(firstMemory).name,
-                answerRevealed = false,
+                questionMode = mode.name,
+                answerRevealed = mode == QuestionMode.INTRODUCE,
                 hintRevealed = false,
                 assessmentSubmitted = false,
                 selectedAssessment = null,
@@ -276,6 +261,10 @@ class VocabularyRepositoryImpl(
                 "Vocabulary session $sessionId not found"
             }
             check(checkpoint.status == VocabularySessionStatus.IN_PROGRESS.name)
+            val mode = QuestionMode.valueOf(checkpoint.questionMode)
+            if (mode != QuestionMode.INTRODUCE && !checkpoint.answerRevealed) {
+                error("Answer must be revealed before assessment")
+            }
             val queueIds = checkpoint.queueWordIdsJson.toStringList()
             val currentId = requireNotNull(queueIds.getOrNull(checkpoint.currentIndex))
             require(currentId == itemId) { "Assessment item is stale" }
@@ -416,6 +405,12 @@ class VocabularyRepositoryImpl(
             val queue = checkpoint.queueWordIdsJson.toStringList()
             val nextIndex = checkpoint.currentIndex + 1
             val completed = nextIndex >= queue.size
+            val nextId = queue.getOrNull(nextIndex)
+            val nextMode = if (completed || nextId == null) {
+                QuestionMode.valueOf(checkpoint.questionMode)
+            } else {
+                questionModeFor(memoryForQuestionMode(nextId))
+            }
             dao.upsertCheckpoint(
                 checkpoint.copy(
                     status = if (completed) {
@@ -424,8 +419,8 @@ class VocabularyRepositoryImpl(
                         checkpoint.status
                     },
                     currentIndex = nextIndex,
-                    questionMode = QuestionMode.INTRODUCE.name,
-                    answerRevealed = false,
+                    questionMode = nextMode.name,
+                    answerRevealed = nextMode == QuestionMode.INTRODUCE,
                     hintRevealed = false,
                     assessmentSubmitted = false,
                     selectedAssessment = null,
@@ -435,7 +430,7 @@ class VocabularyRepositoryImpl(
         }
     }
 
-    suspend fun revealVocabularyAnswer(sessionId: String) {
+    override suspend fun revealVocabularyAnswer(sessionId: String) {
         val checkpoint = requireNotNull(dao.getCheckpoint(sessionId)) {
             "Vocabulary session $sessionId not found"
         }
@@ -679,6 +674,30 @@ class VocabularyRepositoryImpl(
     }
 
     // ------------------------------------------------------------------
+
+    private suspend fun memoryForQuestionMode(itemId: String): WordMemoryStateEntity? {
+        return if (isPhraseId(itemId)) {
+            itemMemoryDao.get(itemId, ItemType.PHRASE.name)?.let {
+                WordMemoryStateEntity(
+                    wordId = it.itemId,
+                    fsrsState = it.fsrsState,
+                    difficulty = it.difficulty,
+                    stability = it.stability,
+                    dueAtEpochMs = it.dueAtEpochMs,
+                    lastReviewAtEpochMs = it.lastReviewAtEpochMs,
+                    reps = it.reps,
+                    lapses = it.lapses,
+                    masteredUi = false,
+                    lastQuestionMode = null,
+                    isFavorite = false,
+                    learnedContentHash = it.learnedContentHash,
+                    updatedAtEpochMs = it.updatedAtEpochMs,
+                )
+            }
+        } else {
+            dao.getMemoryState(itemId)
+        }
+    }
 
     /** Deterministic question-mode rule (TDD §4.1). */
     private fun questionModeFor(memory: WordMemoryStateEntity?): QuestionMode {

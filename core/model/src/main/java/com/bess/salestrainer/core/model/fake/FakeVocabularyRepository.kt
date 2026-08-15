@@ -71,20 +71,22 @@ class FakeVocabularyRepository : VocabularyRepository {
         require(queue.isNotEmpty()) { "No vocabulary is available" }
         val now = Instant.now()
         val sessionId = "vocab_${UUID.randomUUID()}"
+        val firstWord = words.value.first { it.id == queue.first() }
+        val mode = questionModeFor(firstWord)
         val checkpoint = VocabularySessionCheckpoint(
             sessionId = sessionId,
             status = VocabularySessionStatus.IN_PROGRESS,
             corpusVersion = "fake-1",
             queueWordIds = queue,
             currentIndex = 0,
-            questionMode = questionModeFor(words.value.first { it.id == queue.first() }),
-            answerRevealed = false,
+            questionMode = mode,
+            answerRevealed = mode == QuestionMode.INTRODUCE,
             hintRevealed = false,
             startedAt = now,
             updatedAt = now,
         )
         sessions[sessionId] = MutableStateFlow(
-            VocabularySessionView(checkpoint, words.value.first { it.id == queue.first() }, queue.size)
+            VocabularySessionView(checkpoint, firstWord, queue.size)
         )
         activeSessionId = sessionId
         return sessionId
@@ -98,6 +100,10 @@ class FakeVocabularyRepository : VocabularyRepository {
         val flow = sessions.getValue(sessionId)
         val view = flow.value
         require(view.currentWord?.id == itemId)
+        val mode = view.checkpoint.questionMode
+        if (mode != QuestionMode.INTRODUCE && !view.checkpoint.answerRevealed) {
+            error("Answer must be revealed before assessment")
+        }
         if (view.checkpoint.assessmentSubmitted) return
         val now = Instant.now()
         val rating = when (assessment) {
@@ -159,9 +165,13 @@ class FakeVocabularyRepository : VocabularyRepository {
             )
         } else {
             val next = words.value.first { it.id == view.checkpoint.queueWordIds[nextIndex] }
+            val nextMode = questionModeFor(next)
             flow.value = VocabularySessionView(
                 checkpoint = view.checkpoint.copy(
                     currentIndex = nextIndex,
+                    questionMode = nextMode,
+                    answerRevealed = nextMode == QuestionMode.INTRODUCE,
+                    hintRevealed = false,
                     assessmentSubmitted = false,
                     selectedAssessment = null,
                     updatedAt = Instant.now(),
@@ -173,7 +183,7 @@ class FakeVocabularyRepository : VocabularyRepository {
         }
     }
 
-    suspend fun revealVocabularyAnswer(sessionId: String) {
+    override suspend fun revealVocabularyAnswer(sessionId: String) {
         val flow = sessions.getValue(sessionId)
         val view = flow.value
         require(view.checkpoint.status == VocabularySessionStatus.IN_PROGRESS)

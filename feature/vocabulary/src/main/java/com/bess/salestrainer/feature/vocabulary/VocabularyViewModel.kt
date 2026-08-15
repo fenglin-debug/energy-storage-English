@@ -137,8 +137,15 @@ class VocabularyViewModel @Inject constructor(
         _practiceState.value.view?.currentWord?.exampleAudioAssetId?.let(::playAsset)
     }
 
-    @Deprecated("Three-way self assessment no longer reveals a hidden answer")
-    fun revealAnswer() = Unit
+    fun revealAnswer() {
+        val id = _practiceState.value.sessionId ?: return
+        viewModelScope.launch {
+            runCatching { vocabularyRepository.revealVocabularyAnswer(id) }
+                .onFailure {
+                    _practiceState.value = _practiceState.value.copy(error = "无法显示答案，请重试")
+                }
+        }
+    }
 
     private fun playAsset(assetId: String) {
         viewModelScope.launch {
@@ -207,6 +214,6 @@ fun questionPromptFor(mode: QuestionMode, word: Vocabulary): String = when (mode
     QuestionMode.INTRODUCE -> word.term
     QuestionMode.EN2ZH -> word.term
     QuestionMode.ZH2EN -> word.chineseGloss
-    QuestionMode.LISTENING -> "🔊 听音辨词"
+    QuestionMode.LISTENING -> "听音辨词"
     QuestionMode.TRANSFER -> word.exampleSentenceEn.replace(word.term, "____", ignoreCase = true)
 }

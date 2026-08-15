@@ -50,6 +50,7 @@ interface VocabularyRepository {
     fun observeTodayQueue(): Flow<VocabularyQueue>
     fun observeSession(sessionId: String): Flow<VocabularySessionView>
     suspend fun startOrResumeSession(): String
+    suspend fun revealVocabularyAnswer(sessionId: String)
     suspend fun submitAssessment(
         sessionId: String,
         itemId: String,

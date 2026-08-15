@@ -8,6 +8,7 @@ import com.bess.salestrainer.core.database.entity.VocabularyEntryEntity
 import com.bess.salestrainer.core.database.entity.WordMemoryStateEntity
 import com.bess.salestrainer.core.model.FsrsState
 import com.bess.salestrainer.core.model.MasteryFilter
+import com.bess.salestrainer.core.model.QuestionMode
 import com.bess.salestrainer.core.model.Rating
 import com.bess.salestrainer.core.model.RecordWordReview
 import com.bess.salestrainer.core.model.ReviewAdvance
@@ -93,6 +94,23 @@ class VocabularyRepositoryImplTest {
     @Test
     fun ratingRequiresReveal() = runTest {
         db.vocabularyDao().upsert(vocab("w1", "battery"))
+        val now = Instant.now()
+        db.vocabularyDao().upsertMemoryState(
+            WordMemoryStateEntity(
+                wordId = "w1",
+                fsrsState = FsrsState.REVIEW.name,
+                difficulty = 5.0,
+                stability = 5.0,
+                dueAtEpochMs = now.minusSeconds(60).toEpochMilli(),
+                lastReviewAtEpochMs = now.minusSeconds(600).toEpochMilli(),
+                reps = 3,
+                lapses = 0,
+                masteredUi = false,
+                lastQuestionMode = null,
+                learnedContentHash = "hash_w1",
+                updatedAtEpochMs = now.toEpochMilli(),
+            ),
+        )
         val sessionId = repo.startOrResumeSession()
 
         val error = runCatching {
@@ -295,10 +313,54 @@ class VocabularyRepositoryImplTest {
         )
 
         val sessionId = repo.startOrResumeSession()
+        repo.revealVocabularyAnswer(sessionId)
         repo.submitAssessment(sessionId, "w1", VocabularySelfAssessment.FUZZY)
 
         assertEquals(2, db.vocabularyDao().getMemoryState("w1")!!.reps)
         assertTrue(db.vocabularyDao().getCheckpoint(sessionId)!!.assessmentSubmitted)
+    }
+
+    @Test
+    fun assessmentRequiresRevealExceptIntroduce() = runTest {
+        db.vocabularyDao().upsert(vocab("w1", "battery"))
+        val now = Instant.now()
+        db.vocabularyDao().upsertMemoryState(
+            WordMemoryStateEntity(
+                wordId = "w1",
+                fsrsState = FsrsState.REVIEW.name,
+                difficulty = 5.0,
+                stability = 5.0,
+                dueAtEpochMs = now.minusSeconds(60).toEpochMilli(),
+                lastReviewAtEpochMs = now.minusSeconds(600).toEpochMilli(),
+                reps = 3,
+                lapses = 0,
+                masteredUi = false,
+                lastQuestionMode = null,
+                learnedContentHash = "hash_w1",
+                updatedAtEpochMs = now.toEpochMilli(),
+            ),
+        )
+        val sessionId = repo.startOrResumeSession()
+        val mode = repo.observeSession(sessionId).first().checkpoint.questionMode
+        assertTrue(mode != QuestionMode.INTRODUCE)
+
+        val blocked = runCatching {
+            repo.submitAssessment(sessionId, "w1", VocabularySelfAssessment.FUZZY)
+        }
+        assertTrue(blocked.isFailure)
+
+        repo.revealVocabularyAnswer(sessionId)
+        repo.submitAssessment(sessionId, "w1", VocabularySelfAssessment.FUZZY)
+        assertTrue(repo.observeSession(sessionId).first().checkpoint.assessmentSubmitted)
+    }
+
+    @Test
+    fun introduceSessionStartsRevealed() = runTest {
+        db.vocabularyDao().upsert(vocab("w1", "battery"))
+        val sessionId = repo.startOrResumeSession()
+        val view = repo.observeSession(sessionId).first()
+        assertEquals(QuestionMode.INTRODUCE, view.checkpoint.questionMode)
+        assertTrue(view.checkpoint.answerRevealed)
     }
 
     @Test

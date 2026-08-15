@@ -2,35 +2,32 @@ package com.bess.salestrainer.feature.vocabulary
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bess.salestrainer.core.model.QuestionMode
-import com.bess.salestrainer.core.model.Rating
+import com.bess.salestrainer.core.model.Vocabulary
 import com.bess.salestrainer.core.model.VocabularySelfAssessment
 
 /** B-03: vocabulary practice — deterministic question modes, reveal-before-rate. */
@@ -40,169 +37,21 @@ fun VocabularyPracticeScreen(
     viewModel: VocabularyViewModel = hiltViewModel(),
 ) {
     val state by viewModel.practiceState.collectAsStateWithLifecycle()
-    var cardShownAtMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(Unit) { viewModel.startOrResumePractice() }
 
-    VocabularySelfAssessmentContent(state, viewModel, onFinished)
-    return
-
-    @Suppress("UNREACHABLE_CODE")
-    val view = state.view
-    when {
-        state.error != null -> {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    state.error ?: "",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Button(
-                    onClick = {
-                        viewModel.leavePractice()
-                        onFinished()
-                    },
-                    modifier = Modifier.padding(top = 16.dp),
-                ) { Text("返回词汇列表") }
-            }
-        }
-        state.completed -> {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("本次学习完成", style = MaterialTheme.typography.headlineSmall)
-                Button(onClick = {
-                    viewModel.leavePractice()
-                    onFinished()
-                }, modifier = Modifier.padding(top = 16.dp)) { Text("返回") }
-            }
-        }
-        view == null || view.currentWord == null -> {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) { CircularProgressIndicator() }
-        }
-        else -> {
-            val word = view.currentWord ?: run {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) { CircularProgressIndicator() }
-                return
-            }
-            val checkpoint = view.checkpoint
-            val mode = checkpoint.questionMode
-
-            // Reset timer whenever the card changes; LISTENING auto-plays.
-            LaunchedEffect(word.id, checkpoint.currentIndex) {
-                cardShownAtMs = System.currentTimeMillis()
-                if (mode == QuestionMode.LISTENING) {
-                    viewModel.playWordAudio()
-                }
-            }
-
-            Column(
-                modifier = Modifier.fillMaxSize().padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Text(
-                    "剩余 ${view.remainingCount} · ${modeLabel(mode)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        // Question side: always visible; the ANSWER side stays
-                        // out of composition (and semantics) until revealed.
-                        Text(
-                            questionPromptFor(mode, word),
-                            style = MaterialTheme.typography.headlineSmall,
-                        )
-                        if (mode != QuestionMode.ZH2EN && mode != QuestionMode.LISTENING) {
-                            Text(
-                                word.ipa,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-
-                        // Word audio replay (core interaction for LISTENING).
-                        OutlinedButton(onClick = { viewModel.playWordAudio() }) {
-                            Text("🔊 播放单词")
-                        }
-
-                        if (checkpoint.answerRevealed) {
-                            AnswerPanel(mode, word)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { viewModel.playWordAudio() }) {
-                                    Text("🔊 单词")
-                                }
-                                OutlinedButton(onClick = { viewModel.playExampleAudio() }) {
-                                    Text("🔊 例句")
-                                }
-                            }
-                        } else {
-                            Button(onClick = { viewModel.revealAnswer() }) { Text("显示答案") }
-                        }
-                    }
-                }
-
-                if (checkpoint.answerRevealed) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        RatingButton("再来", Modifier.weight(1f), state.submitting) {
-                            viewModel.rate(Rating.AGAIN, cardShownAtMs)
-                        }
-                        RatingButton("困难", Modifier.weight(1f), state.submitting) {
-                            viewModel.rate(Rating.HARD, cardShownAtMs)
-                        }
-                        RatingButton("良好", Modifier.weight(1f), state.submitting) {
-                            viewModel.rate(Rating.GOOD, cardShownAtMs)
-                        }
-                        RatingButton("简单", Modifier.weight(1f), state.submitting) {
-                            viewModel.rate(Rating.EASY, cardShownAtMs)
-                        }
-                    }
-                }
-
-                OutlinedButton(onClick = {
-                    viewModel.leavePractice()
-                    onFinished()
-                }, modifier = Modifier.fillMaxWidth()) { Text("结束本次学习") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun VocabularySelfAssessmentContent(
-    state: PracticeUiState,
-    viewModel: VocabularyViewModel,
-    onFinished: () -> Unit,
-) {
     val view = state.view
     when {
         state.error != null -> {
             Column(
                 Modifier.fillMaxSize().padding(24.dp),
                 verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(state.error.orEmpty())
+                Text(
+                    state.error.orEmpty(),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 Button(
                     onClick = {
                         viewModel.leavePractice()
@@ -237,16 +86,26 @@ private fun VocabularySelfAssessmentContent(
         }
         else -> {
             val word = requireNotNull(view.currentWord)
-            val submitted = view.checkpoint.assessmentSubmitted
+            val checkpoint = view.checkpoint
+            val mode = checkpoint.questionMode
+            val submitted = checkpoint.assessmentSubmitted
+            val revealed = checkpoint.answerRevealed
+
+            LaunchedEffect(word.id, mode) {
+                if (mode == QuestionMode.LISTENING) {
+                    viewModel.playWordAudio()
+                }
+            }
+
             Column(Modifier.fillMaxSize()) {
                 LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+                    contentPadding = PaddingValues(20.dp),
                 ) {
                     item {
                         Text(
-                            "第 ${view.checkpoint.currentIndex + 1} 条 · 剩余 ${view.remainingCount}",
+                            "第 ${checkpoint.currentIndex + 1} 条 · 剩余 ${view.remainingCount} · ${modeLabel(mode)}",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -257,39 +116,9 @@ private fun VocabularySelfAssessmentContent(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                Text(word.term, style = MaterialTheme.typography.headlineMedium)
-                                if (word.ipa.isNotBlank()) {
-                                    Text(word.ipa, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
-                                OutlinedButton(
-                                    onClick = viewModel::playWordAudio,
-                                    modifier = Modifier.heightIn(min = 48.dp),
-                                ) {
-                                    Icon(Icons.Filled.VolumeUp, contentDescription = null)
-                                    Text("朗读", modifier = Modifier.padding(start = 8.dp))
-                                }
-                            }
-                        }
-                    }
-                    items(word.examples.size) { index ->
-                        val example = word.examples[index]
-                        Card(Modifier.fillMaxWidth()) {
-                            Column(
-                                Modifier.fillMaxWidth().padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text(example.textEn, style = MaterialTheme.typography.bodyLarge)
-                                Text(
-                                    example.textZh,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                OutlinedButton(
-                                    onClick = { viewModel.playExampleAudio(example.audioAssetId) },
-                                    modifier = Modifier.heightIn(min = 48.dp),
-                                ) {
-                                    Icon(Icons.Filled.VolumeUp, contentDescription = null)
-                                    Text("朗读例句", modifier = Modifier.padding(start = 8.dp))
+                                PromptPanel(mode, word, viewModel)
+                                if (revealed) {
+                                    AnswerPanel(mode, word, viewModel)
                                 }
                             }
                         }
@@ -300,7 +129,12 @@ private fun VocabularySelfAssessmentContent(
                     Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    if (!submitted) {
+                    if (!revealed) {
+                        Button(
+                            onClick = { viewModel.revealAnswer() },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        ) { Text("显示答案") }
+                    } else if (!submitted) {
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -320,7 +154,7 @@ private fun VocabularySelfAssessmentContent(
                         }
                     } else {
                         Text(
-                            "已选择：${assessmentLabel(view.checkpoint.selectedAssessment)}",
+                            "已选择：${assessmentLabel(checkpoint.selectedAssessment)}",
                             color = MaterialTheme.colorScheme.primary,
                         )
                         Button(
@@ -331,9 +165,145 @@ private fun VocabularySelfAssessmentContent(
                             Text(if (view.hasNext) "下一条" else "完成本次学习")
                         }
                     }
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.leavePractice()
+                            onFinished()
+                        },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    ) { Text("结束本次学习") }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PromptPanel(
+    mode: QuestionMode,
+    word: Vocabulary,
+    viewModel: VocabularyViewModel,
+) {
+    when (mode) {
+        QuestionMode.INTRODUCE -> {
+            Text(word.term, style = MaterialTheme.typography.headlineMedium)
+            if (word.ipa.isNotBlank()) {
+                Text(word.ipa, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            PlayWordButton(viewModel)
+        }
+        QuestionMode.EN2ZH -> {
+            Text(word.term, style = MaterialTheme.typography.headlineMedium)
+            if (word.ipa.isNotBlank()) {
+                Text(word.ipa, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            PlayWordButton(viewModel)
+        }
+        QuestionMode.ZH2EN -> {
+            Text(word.chineseGloss, style = MaterialTheme.typography.headlineSmall)
+            Text(
+                word.topic,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        QuestionMode.LISTENING -> {
+            Text(
+                questionPromptFor(mode, word),
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            PlayWordButton(viewModel)
+        }
+        QuestionMode.TRANSFER -> {
+            Text(
+                questionPromptFor(mode, word),
+                style = MaterialTheme.typography.headlineSmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnswerPanel(
+    mode: QuestionMode,
+    word: Vocabulary,
+    viewModel: VocabularyViewModel,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        when (mode) {
+            QuestionMode.INTRODUCE -> {
+                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
+                if (word.collocations.isNotEmpty()) {
+                    Text(
+                        word.collocations.joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Text(word.exampleSentenceEn, style = MaterialTheme.typography.bodyLarge)
+                word.exampleSentenceZh?.let {
+                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(
+                    word.commonMistakes,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                PlayExampleButton(viewModel, word.exampleAudioAssetId)
+            }
+            QuestionMode.EN2ZH -> {
+                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
+                Text(word.exampleSentenceEn, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    word.commonMistakes,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                PlayExampleButton(viewModel, word.exampleAudioAssetId)
+            }
+            QuestionMode.ZH2EN -> {
+                Text(word.term, style = MaterialTheme.typography.headlineMedium)
+                if (word.ipa.isNotBlank()) {
+                    Text(word.ipa, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(word.exampleSentenceEn, style = MaterialTheme.typography.bodyLarge)
+                PlayWordButton(viewModel)
+                PlayExampleButton(viewModel, word.exampleAudioAssetId)
+            }
+            QuestionMode.LISTENING -> {
+                Text(word.term, style = MaterialTheme.typography.headlineMedium)
+                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
+            }
+            QuestionMode.TRANSFER -> {
+                Text(word.exampleSentenceEn, style = MaterialTheme.typography.bodyLarge)
+                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
+                PlayExampleButton(viewModel, word.exampleAudioAssetId)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayWordButton(viewModel: VocabularyViewModel) {
+    OutlinedButton(
+        onClick = viewModel::playWordAudio,
+        modifier = Modifier.heightIn(min = 48.dp),
+    ) {
+        Icon(Icons.Filled.VolumeUp, contentDescription = null)
+        Text("朗读", modifier = Modifier.padding(start = 8.dp))
+    }
+}
+
+@Composable
+private fun PlayExampleButton(viewModel: VocabularyViewModel, assetId: String) {
+    OutlinedButton(
+        onClick = { viewModel.playExampleAudio(assetId) },
+        modifier = Modifier.heightIn(min = 48.dp),
+    ) {
+        Icon(Icons.Filled.VolumeUp, contentDescription = null)
+        Text("朗读例句", modifier = Modifier.padding(start = 8.dp))
     }
 }
 
@@ -356,53 +326,6 @@ private fun assessmentLabel(value: VocabularySelfAssessment?): String = when (va
     VocabularySelfAssessment.FUZZY -> "模糊"
     VocabularySelfAssessment.MASTERED -> "掌握"
     null -> ""
-}
-
-@Composable
-private fun AnswerPanel(mode: QuestionMode, word: com.bess.salestrainer.core.model.Vocabulary) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        when (mode) {
-            QuestionMode.EN2ZH, QuestionMode.INTRODUCE -> {
-                if (mode == QuestionMode.INTRODUCE) {
-                    Text(word.term, style = MaterialTheme.typography.titleLarge)
-                }
-                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
-            }
-            QuestionMode.ZH2EN -> {
-                Text(word.term, style = MaterialTheme.typography.titleLarge)
-                Text(word.ipa, style = MaterialTheme.typography.bodyMedium)
-            }
-            QuestionMode.LISTENING -> {
-                Text(word.term, style = MaterialTheme.typography.titleLarge)
-                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
-            }
-            QuestionMode.TRANSFER -> {
-                Text(word.exampleSentenceEn, style = MaterialTheme.typography.bodyLarge)
-                Text(word.chineseGloss, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-        Text(
-            "例句：${word.exampleSentenceEn}",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(
-            "常见错误：${word.commonMistakes}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun RatingButton(
-    label: String,
-    modifier: Modifier,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    OutlinedButton(onClick = onClick, modifier = modifier, enabled = !enabled) {
-        Text(label)
-    }
 }
 
 internal fun modeLabel(mode: QuestionMode): String = when (mode) {
