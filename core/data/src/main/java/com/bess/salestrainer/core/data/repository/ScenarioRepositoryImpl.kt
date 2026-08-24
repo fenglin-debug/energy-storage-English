@@ -400,7 +400,10 @@ class ScenarioRepositoryImpl(
             pairCount = session.pairCount,
             customerAudioAssetId = customerTurn.audioAssetId.orEmpty(),
             customerText = if (progress.customerTextRevealed) {
-                CustomerTextView.Revealed(customerTurn.textEn)
+                CustomerTextView.Revealed(
+                    english = customerTurn.textEn,
+                    chinese = customerTurn.textZh?.takeIf { it.isNotBlank() },
+                )
             } else {
                 CustomerTextView.Concealed
             },

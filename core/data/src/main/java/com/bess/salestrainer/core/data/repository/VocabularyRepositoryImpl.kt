@@ -710,9 +710,8 @@ class VocabularyRepositoryImpl(
         return when (memory.fsrsState) {
             FsrsState.LEARNING.name, FsrsState.RELEARNING.name ->
                 if (memory.reps % 2 == 0) QuestionMode.EN2ZH else QuestionMode.ZH2EN
-            else -> when (memory.reps % 3) {
+            else -> when (memory.reps % 2) {
                 0 -> QuestionMode.LISTENING
-                1 -> QuestionMode.TRANSFER
                 else -> QuestionMode.EN2ZH
             }
         }

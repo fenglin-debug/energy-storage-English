@@ -97,10 +97,19 @@ fun ScenarioPracticeScreen(
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("客户", style = MaterialTheme.typography.titleSmall)
                         when (val customer = unit.customerText) {
-                            is CustomerTextView.Revealed -> Text(
-                                customer.english,
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
+                            is CustomerTextView.Revealed -> {
+                                Text(
+                                    customer.english,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                                customer.chinese?.takeIf { it.isNotBlank() }?.let { chinese ->
+                                    Text(
+                                        chinese,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
                             CustomerTextView.Concealed -> Text(
                                 "▓▓▓▓▓▓▓▓▓▓（先听音频）",
                                 style = MaterialTheme.typography.bodyLarge,

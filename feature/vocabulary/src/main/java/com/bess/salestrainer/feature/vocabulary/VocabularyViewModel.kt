@@ -219,5 +219,5 @@ fun questionPromptFor(mode: QuestionMode, word: Vocabulary): String = when (mode
     QuestionMode.EN2ZH -> word.term
     QuestionMode.ZH2EN -> word.chineseGloss
     QuestionMode.LISTENING -> "听音辨词"
-    QuestionMode.TRANSFER -> word.exampleSentenceEn.replace(word.term, "____", ignoreCase = true)
+    QuestionMode.TRANSFER -> word.term
 }

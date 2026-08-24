@@ -26,6 +26,7 @@ class FakeScenarioRepository : ScenarioRepository {
     private data class PairContent(
         val pairId: String,
         val customerEnglish: String,
+        val customerChinese: String? = null,
         val keywords: List<Keyword>,
         val answer: ReferenceAnswer,
         val audioAssetId: String,
@@ -104,7 +105,12 @@ class FakeScenarioRepository : ScenarioRepository {
         updateCurrent(sessionId, pairId) { view ->
             val content = contentFor(sessionId, pairId)
             view.copy(
-                unit = view.unit.copy(customerText = CustomerTextView.Revealed(content.customerEnglish)),
+                unit = view.unit.copy(
+                    customerText = CustomerTextView.Revealed(
+                        english = content.customerEnglish,
+                        chinese = content.customerChinese,
+                    ),
+                ),
                 progress = view.progress.copy(customerTextRevealed = true, updatedAt = Instant.now()),
             )
         }
@@ -239,6 +245,7 @@ class FakeScenarioRepository : ScenarioRepository {
             PairContent(
                 pairId = "S001_P001",
                 customerEnglish = "How does your system maintain stable output during long-duration discharge?",
+                customerChinese = "长时放电过程中，你们的系统如何保持出力稳定？",
                 keywords = listOf(
                     Keyword("V_001", "round-trip efficiency", "/ˌraʊnd ˈtrɪp ɪˈfɪʃənsi/", "往返效率")
                 ),
@@ -255,6 +262,7 @@ class FakeScenarioRepository : ScenarioRepository {
             PairContent(
                 pairId = "S001_P002",
                 customerEnglish = "What information do you need before you prepare the technical proposal?",
+                customerChinese = "准备技术方案之前，你们需要哪些信息？",
                 keywords = listOf(
                     Keyword("V_002", "auxiliary consumption", "/ɔːɡˈzɪliəri kənˈsʌmpʃən/", "辅助用电")
                 ),

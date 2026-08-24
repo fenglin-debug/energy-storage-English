@@ -211,6 +211,11 @@ private fun WordDetailContent(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                PlayAudioButton(
+                    "朗读单词",
+                    modifier = Modifier.padding(top = 8.dp),
+                    onClick = onPlayWord,
+                )
             }
             item {
                 DetailSection("中文", word.chineseGloss)
@@ -221,21 +226,22 @@ private fun WordDetailContent(
                 }
             }
             item {
-                Text("例句", style = MaterialTheme.typography.titleSmall)
-                Text(word.exampleSentenceEn, style = MaterialTheme.typography.bodyLarge)
-                word.exampleSentenceZh?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                ExampleWithAudio(
+                    label = "例句",
+                    english = word.exampleSentenceEn,
+                    chinese = word.exampleSentenceZh,
+                    audioAssetId = word.exampleAudioAssetId,
+                    onPlay = onPlayExample,
+                )
             }
             extraExamples.forEach { example ->
                 item {
-                    Text(example.textEn, style = MaterialTheme.typography.bodyLarge)
-                    if (example.textZh.isNotBlank()) {
-                        Text(example.textZh, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (example.audioAssetId.isNotBlank()) {
-                        PlayAudioButton("朗读例句") { onPlayExample(example.audioAssetId) }
-                    }
+                    ExampleWithAudio(
+                        english = example.textEn,
+                        chinese = example.textZh,
+                        audioAssetId = example.audioAssetId,
+                        onPlay = onPlayExample,
+                    )
                 }
             }
             if (word.commonMistakes.isNotBlank()) {
@@ -243,17 +249,28 @@ private fun WordDetailContent(
                     DetailSection("易错点", word.commonMistakes)
                 }
             }
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    PlayAudioButton("朗读单词", Modifier.weight(1f), onPlayWord)
-                    PlayAudioButton("朗读例句", Modifier.weight(1f)) {
-                        onPlayExample(word.exampleAudioAssetId)
-                    }
-                }
-            }
+        }
+    }
+}
+
+@Composable
+private fun ExampleWithAudio(
+    english: String,
+    chinese: String?,
+    audioAssetId: String,
+    onPlay: (String) -> Unit,
+    label: String? = null,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (label != null) {
+            Text(label, style = MaterialTheme.typography.titleSmall)
+        }
+        Text(english, style = MaterialTheme.typography.bodyLarge)
+        chinese?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (audioAssetId.isNotBlank()) {
+            PlayAudioButton("朗读例句") { onPlay(audioAssetId) }
         }
     }
 }

@@ -3,8 +3,6 @@ package com.bess.salestrainer.feature.vocabulary
 import com.bess.salestrainer.core.model.QuestionMode
 import com.bess.salestrainer.core.model.Vocabulary
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VocabularyQuestionPromptTest {
@@ -12,14 +10,6 @@ class VocabularyQuestionPromptTest {
     fun listeningHidesTerm() {
         val word = sampleWord(term = "battery energy storage")
         assertEquals("听音辨词", questionPromptFor(QuestionMode.LISTENING, word))
-    }
-
-    @Test
-    fun transferMasksTerm() {
-        val word = sampleWord(term = "inverter", example = "The inverter converts DC to AC.")
-        val prompt = questionPromptFor(QuestionMode.TRANSFER, word)
-        assertFalse(prompt.contains("inverter", ignoreCase = true))
-        assertTrue(prompt.contains("____"))
     }
 }
 

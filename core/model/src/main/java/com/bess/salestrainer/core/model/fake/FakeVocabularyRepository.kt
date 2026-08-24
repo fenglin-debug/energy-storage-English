@@ -278,9 +278,8 @@ class FakeVocabularyRepository : VocabularyRepository {
     private fun questionModeFor(word: Vocabulary): QuestionMode {
         val memory = word.memoryState ?: return QuestionMode.INTRODUCE
         if (memory.fsrsState == FsrsState.NEW) return QuestionMode.INTRODUCE
-        return when (memory.reps % 3) {
+        return when (memory.reps % 2) {
             0 -> QuestionMode.LISTENING
-            1 -> QuestionMode.TRANSFER
             else -> QuestionMode.EN2ZH
         }
     }

@@ -88,7 +88,7 @@ fun VocabularyPracticeScreen(
         else -> {
             val word = requireNotNull(view.currentWord)
             val checkpoint = view.checkpoint
-            val mode = checkpoint.questionMode
+            val mode = displayQuestionMode(checkpoint.questionMode)
             val submitted = checkpoint.assessmentSubmitted
             val revealed = checkpoint.answerRevealed
 
@@ -202,19 +202,8 @@ private fun PromptPanel(
     viewModel: VocabularyViewModel,
 ) {
     when (mode) {
-        QuestionMode.INTRODUCE -> {
-            Text(word.term, style = MaterialTheme.typography.headlineMedium)
-            if (word.ipa.isNotBlank()) {
-                Text(word.ipa, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            PlayWordButton(viewModel)
-        }
-        QuestionMode.EN2ZH -> {
-            Text(word.term, style = MaterialTheme.typography.headlineMedium)
-            if (word.ipa.isNotBlank()) {
-                Text(word.ipa, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            PlayWordButton(viewModel)
+        QuestionMode.INTRODUCE, QuestionMode.EN2ZH, QuestionMode.TRANSFER -> {
+            WordAudioBlock(word.term, word.ipa, viewModel)
         }
         QuestionMode.ZH2EN -> {
             Text(word.chineseGloss, style = MaterialTheme.typography.headlineSmall)
@@ -231,12 +220,6 @@ private fun PromptPanel(
             )
             PlayWordButton(viewModel)
         }
-        QuestionMode.TRANSFER -> {
-            Text(
-                questionPromptFor(mode, word),
-                style = MaterialTheme.typography.headlineSmall,
-            )
-        }
     }
 }
 
@@ -248,56 +231,76 @@ private fun AnswerPanel(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        when (mode) {
-            QuestionMode.INTRODUCE -> {
-                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
-                if (word.collocations.isNotEmpty()) {
-                    Text(
-                        word.collocations.joinToString(" · "),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                Text(word.exampleSentenceEn, style = MaterialTheme.typography.bodyLarge)
-                word.exampleSentenceZh?.let {
-                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text(
-                    word.commonMistakes,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                PlayExampleButton(viewModel, word.exampleAudioAssetId)
-            }
-            QuestionMode.EN2ZH -> {
-                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
-                Text(word.exampleSentenceEn, style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    word.commonMistakes,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                PlayExampleButton(viewModel, word.exampleAudioAssetId)
-            }
-            QuestionMode.ZH2EN -> {
-                Text(word.term, style = MaterialTheme.typography.headlineMedium)
-                if (word.ipa.isNotBlank()) {
-                    Text(word.ipa, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text(word.exampleSentenceEn, style = MaterialTheme.typography.bodyLarge)
-                PlayWordButton(viewModel)
-                PlayExampleButton(viewModel, word.exampleAudioAssetId)
-            }
-            QuestionMode.LISTENING -> {
-                Text(word.term, style = MaterialTheme.typography.headlineMedium)
-                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
-            }
-            QuestionMode.TRANSFER -> {
-                Text(word.exampleSentenceEn, style = MaterialTheme.typography.bodyLarge)
-                Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
-                PlayExampleButton(viewModel, word.exampleAudioAssetId)
-            }
+        if (mode == QuestionMode.ZH2EN || mode == QuestionMode.LISTENING) {
+            WordAudioBlock(word.term, word.ipa, viewModel)
+        }
+        if (mode != QuestionMode.ZH2EN) {
+            Text(word.chineseGloss, style = MaterialTheme.typography.titleMedium)
+        }
+        if (mode == QuestionMode.INTRODUCE && word.collocations.isNotEmpty()) {
+            Text(
+                word.collocations.joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        ExampleAudioBlock(
+            english = word.exampleSentenceEn,
+            chinese = word.exampleSentenceZh,
+            audioAssetId = word.exampleAudioAssetId,
+            viewModel = viewModel,
+        )
+        word.examples.filter { it.textEn != word.exampleSentenceEn }.forEach { example ->
+            ExampleAudioBlock(
+                english = example.textEn,
+                chinese = example.textZh,
+                audioAssetId = example.audioAssetId,
+                viewModel = viewModel,
+            )
+        }
+        if (word.commonMistakes.isNotBlank()) {
+            Text(
+                word.commonMistakes,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WordAudioBlock(term: String, ipa: String, viewModel: VocabularyViewModel) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(term, style = MaterialTheme.typography.headlineMedium)
+        if (ipa.isNotBlank()) {
+            Text(ipa, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        PlayWordButton(viewModel)
+    }
+}
+
+@Composable
+private fun ExampleAudioBlock(
+    english: String,
+    chinese: String?,
+    audioAssetId: String,
+    viewModel: VocabularyViewModel,
+) {
+    if (english.isBlank()) return
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(english, style = MaterialTheme.typography.bodyLarge)
+        chinese?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (audioAssetId.isNotBlank()) {
+            PlayExampleButton(viewModel, audioAssetId)
         }
     }
 }
@@ -347,10 +350,12 @@ private fun AssessmentButton(
     ) { Text(label) }
 }
 
-internal fun modeLabel(mode: QuestionMode): String = when (mode) {
+internal fun displayQuestionMode(mode: QuestionMode): QuestionMode =
+    if (mode == QuestionMode.TRANSFER) QuestionMode.EN2ZH else mode
+
+internal fun modeLabel(mode: QuestionMode): String = when (displayQuestionMode(mode)) {
     QuestionMode.INTRODUCE -> "新词学习"
-    QuestionMode.EN2ZH -> "英译中"
     QuestionMode.ZH2EN -> "中译英"
     QuestionMode.LISTENING -> "听音辨词"
-    QuestionMode.TRANSFER -> "迁移运用"
+    QuestionMode.EN2ZH, QuestionMode.TRANSFER -> "英译中"
 }

@@ -26,7 +26,7 @@ data class ScenarioFilter(
 
 sealed interface CustomerTextView {
     data object Concealed : CustomerTextView
-    data class Revealed(val english: String) : CustomerTextView
+    data class Revealed(val english: String, val chinese: String? = null) : CustomerTextView
 }
 
 data class Keyword(
