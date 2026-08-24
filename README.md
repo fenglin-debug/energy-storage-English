@@ -1,48 +1,44 @@
-# BESS 储能英语训练 · 安卓基础版
+# 储能英语训练（安卓版）
 
-离线英语训练 App，面向海外储能销售场景。本仓库是 **Android 基础版** 源码，当前版本 **0.4.1**（`versionCode` 6），包名 `com.bess.salestrainer`。
+给做海外储能销售的人练英语用的手机软件。
 
-应用运行时完全离线：无账号、无云同步、无远程日志。客户、词汇和例句语音来自内置语料包中的预生成本地音频。
+- 不用注册，不用联网
+- 学习记录只存在自己手机里
+- 当前版本：0.4.1（基础版）
 
-## 要求
+## 下载安装包
 
-- Android 8.0+（API 26），仅 `arm64-v8a`
-- JDK 17
-- Android SDK（Compile/Target SDK 36）
+打开 [最新版本下载页](https://github.com/fenglin-debug/energy-storage-English/releases/latest)，下载 `BESS-v0.4.1.apk`。
 
-## 构建
+如果下载后后缀不是 `.apk`，请改名为 `BESS-v0.4.1.apk` 再安装。无病毒、无植入。
 
-```powershell
-$env:JAVA_HOME = '<JDK 17 安装目录>'
-.\gradlew.bat :app:assembleDebug
-.\gradlew.bat :core:model:test
-.\gradlew.bat :app:testDebugUnitTest
-```
+## 第一次安装
 
-Debug 包使用假数据仓库，applicationId 带 `.debug` 后缀。正式签名包不要用 Debug 产物分发。
+1. 手机系统是 **Android 8.0 或更高**，并且是 **64 位**手机（现在常见安卓手机一般都是）。
+2. 打开下载好的安装包。系统若提示「禁止安装未知应用」，按提示允许这一次即可。
+3. 点安装，装完打开就能用。
 
-正式发布需要本机密钥和环境变量（不要把密钥或密码提交进 Git）：
+不支持 32 位手机，也不支持电脑模拟器。
 
-```text
-BESS_KEYSTORE
-BESS_STORE_PASSWORD
-BESS_KEY_ALIAS
-BESS_KEY_PASSWORD
-```
+## 以后更新
 
-然后运行 `tools\release\build-release.ps1`。流程见 `docs/release/RELEASE_PROCESS.md`。
+收到新版本后，**直接打开新的安装包，选更新**。
 
-## 安装
+- 不要卸载旧版
+- 不要清除应用数据
 
-用户安装与升级说明见：
+否则学习记录可能没了。更新前可以在「设置 → 学习记录备份」里先导出一份备份。
 
-- `docs/安卓版使用必看.txt`
-- `docs/release/INSTALL.md`
-- `docs/release/RELEASE_NOTES.md`
+如果系统提示「签名不一致」，停止安装，不要用卸载旧版的办法绕过。
 
-升级时直接覆盖安装，不要卸载旧版或清除应用数据。
+## 使用时请注意
 
-## 不包含
+- 软件完全离线，换手机需要自己导出、再导入学习记录。
+- 卸载会删掉这台手机上的学习数据，换机或重装前先备份。
+- 只从上面的 GitHub 发布页下载安装包，不要装别人转发、改名或重新打包的文件。
 
-- 签名密钥、`local.properties`、APK
-- 会员版、鸿蒙、iOS、Windows 工程
+## 0.4.1 更新了什么
+
+- 单词、例句和朗读按钮挨在一起，不用翻到页面底部。
+- 背单词里去掉了「迁移运用」。
+- 情景模拟点「显示原文」后，客户英文和中文一起出现。
